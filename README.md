@@ -1,5 +1,7 @@
 # 收银系统 / 会员管家（MemberManager）
 
+[![Build](https://github.com/NoctSis/MemberManager/actions/workflows/ci.yml/badge.svg)](https://github.com/NoctSis/MemberManager/actions/workflows/ci.yml)
+
 面向中小门店（美容美发、养生馆、足浴、小型零售等）的 **Windows 单机会员管理与收银软件**。
 
 会员储值、次卡、开单收银、挂单、员工提成、交接班日结、积分商城、报表导出，一套搞定。
@@ -17,11 +19,11 @@
 
 发行包在 [Releases](https://github.com/NoctSis/MemberManager/releases) 页面。**三种包，内容完全一样，只是运行环境打包方式不同**：
 
-| 包 | 体积 | 适合谁 | 说明 |
+| 包（Release 上的文件名） | 体积 | 适合谁 | 说明 |
 | --- | --- | --- | --- |
-| `收银系统-安装版.zip` | 约 3 MB | **Windows 10 / 11 用户（推荐）** | 解压后双击安装。不带运行环境，要求电脑已装 .NET 4.8 和 WebView2（Win10 1803 以后基本都自带）。缺了会明确提示你装哪个。 |
-| `收银系统-Win7离线版.zip` | 约 284 MB | **Windows 7 用户**，以及完全断网的电脑 | 解压后双击安装。内置 .NET Framework 4.8 离线包和 WebView2 109 运行时，断网也能一次装完。 |
-| `收银系统-免安装版.zip` | 约 1.8 MB | 想先试一试、要放 U 盘带着跑 | 解压即用，双击 `MemberManager.exe` 就行，不写注册表。同样要求电脑已有运行环境。 |
+| `MemberManager-1.0.0-install-win10-11.zip`<br>安装版 | 约 3 MB | **Windows 10 / 11 用户（推荐）** | 解压后双击安装。不带运行环境，要求电脑已装 .NET 4.8 和 WebView2（Win10 1803 以后基本都自带）。缺了会明确提示你装哪个。 |
+| `MemberManager-1.0.0-win7-offline.zip`<br>Win7 离线版 | 约 284 MB | **Windows 7 用户**，以及完全断网的电脑 | 解压后双击安装。内置 .NET Framework 4.8 离线包和 WebView2 109 运行时，断网也能一次装完。 |
+| `MemberManager-1.0.0-portable.zip`<br>免安装版 | 约 1.8 MB | 想先试一试、要放 U 盘带着跑 | 解压即用，双击 `MemberManager.exe` 就行，不写注册表。同样要求电脑已有运行环境。 |
 
 **怎么选**：Win10/11 装「安装版」；Win7 或用的是没有网络的电脑，装「Win7离线版」；只想先看看界面，用「免安装版」。
 
@@ -211,8 +213,12 @@ beta\MemberManager.exe
 %windir%\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\_smoke_runner.ps1
 ```
 
-32 个脚本、400+ 条断言，覆盖建库升级、余额恒等式、退款红冲、提成计算、挂单作废、权限拦截、备份加密、单实例等。
+30 个脚本、400+ 条断言，覆盖建库升级、余额恒等式、退款红冲、提成计算、挂单作废、权限拦截、备份加密、单实例等。
 必须用 **32 位** PowerShell（要加载 x86 程序集）。
+
+GitHub Actions 在每次 push / PR 上会走一遍：前端类型检查 → 前端构建 → `build.bat` 编译后端，
+产物 `beta\` 作为 artifact 挂在 [运行记录](https://github.com/NoctSis/MemberManager/actions/workflows/ci.yml) 里，
+不想本地配环境时可以直接下载一份编译结果。冒烟测试依赖本机数据库，不在 CI 里跑。
 
 ---
 
