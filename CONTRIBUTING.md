@@ -110,7 +110,29 @@ LC_ALL=C grep -nP '[\x80-\xFF]' tools/*.ps1
 
 ---
 
-## 六、提 Issue 时请带上
+## 六、版本号怎么加
+
+按**改动的份量**定，不按改了几次定。同一批改动攒在一起发，就算一次；里面有轻有重，
+按最重的那条算。
+
+| 改动份量 | 怎么加 | 例子 |
+| --- | --- | --- |
+| **轻微**：文案、提示语、单个小 bug、界面微调 | 末位 +1（0.01 级） | `1.0.2` → `1.0.3` |
+| **小改**：加一个小功能、调整一处操作流程 | 第二位 +1，末位归零（0.1 级） | `1.0.3` → `1.1.0` |
+| **大改**：动数据层 / 架构 / 多个模块一起改 | 第一位 +1，或第二位 +5（0.5~1 级） | `1.1.0` → `1.6.0` 或 `2.0.0` |
+
+改版本号只需动这四个地方，其余由构建脚本自动读取：
+
+1. `src/*/Properties/AssemblyInfo.cs` 的 `AssemblyVersion` 与 `AssemblyFileVersion`（5 个文件）
+2. `tools/_inno/setup.iss` 的 `MyAppVersion` 和 `OutBase`
+3. `tools/_pack_release.py` 里的 zip 名与包内说明文案
+4. `README.md` 选包表里的 Release 资产名
+
+`compile-inprocess.ps1` 会从 `AssemblyInfo.cs` 正则读版本写进 exe 属性，**不要在别处再硬编码一份**。
+
+---
+
+## 七、提 Issue 时请带上
 
 1. 系统版本（Win7 SP1 / Win10 / Win11，32 还是 64 位）
 2. 软件版本（设置页「关于」里有）
@@ -122,6 +144,6 @@ LC_ALL=C grep -nP '[\x80-\xFF]' tools/*.ps1
 
 ---
 
-## 七、安全问题
+## 八、安全问题
 
 不要开公开 Issue。按 [SECURITY.md](SECURITY.md) 里的方式私下反馈。
