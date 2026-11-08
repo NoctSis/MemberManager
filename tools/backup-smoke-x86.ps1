@@ -279,6 +279,41 @@ try {
     try { [void][MemberManager.BLL.BackupCrypto]::MakeVerifier('password') } catch { $weakCommon = $true }
     Chk 'C9c-common-password-rejected' $weakCommon
 
+    # C8b: the guard must be machine-wide (Global\), not per-session (Local\).
+    #      Two Windows users on one PC can point at the SAME data dir when the
+    #      portable build sits on a shared folder or USB stick; with Local\ each
+    #      session gets its own mutex and both can write the database at once.
+    $mutexName = ''
+    try {
+        $bm = $siType.GetMethod('BuildName', [System.Reflection.BindingFlags]'NonPublic,Static')
+        $mutexName = [string]$bm.Invoke($null, $null)
+    } catch {
+        L ('  diag C8b: ' + $_.Exception.Message)
+    }
+    L ('  diag C8b: mutex=[' + $mutexName + ']')
+    Chk 'C8b-single-instance-is-global' ($mutexName.StartsWith('Global\'))
+
+    # C10: encryption is ON but the machine-stored password is gone (changed
+    #      Windows user / reinstalled OS / DPAPI broken). The backup must be
+    #      REFUSED -- a silent plaintext fallback would make "encrypted" a lie.
+    #      Drop the C7 plain backup first: backup names only carry minutes, so
+    #      C7 and C10 inside the same minute would reuse the same file name and
+    #      the count comparison below would measure an overwrite instead.
+    if (Test-Path $plainPath) { Remove-Item $plainPath -Force -ErrorAction SilentlyContinue }
+    $svc.SetPassword('', $pwdOk, 'hint', 'probe')
+    [MemberManager.DAL.DatabaseInitializer]::SetSetting('backup_pwd_sealed', '')
+    $before = @(Get-ChildItem $svcDir -File -Filter 'member-*').Count
+    $refused = $false
+    try { [void]$svc.BackupNow($true, 'probe') }
+    catch { $refused = $true; L ('  diag C10: ' + $_.Exception.Message) }
+    $after = @(Get-ChildItem $svcDir -File -Filter 'member-*').Count
+    Chk 'C10a-refuse-when-no-stored-password' $refused
+    Chk 'C10b-no-backup-file-left' ($after -eq $before)
+    # restore a sane state (seal the password again, then turn encryption off)
+    $svc.SetPassword($pwdOk, $pwdOk, 'hint', 'probe')
+    $svc.DisableEncrypt($pwdOk, 'probe')
+    Chk 'C10c-state-restored' ($svc.GetEncryptStatus().Enabled -eq $false)
+
     foreach ($f in $encFiles) {
         if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
     }

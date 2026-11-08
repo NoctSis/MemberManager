@@ -771,7 +771,15 @@ namespace MemberManager.BLL
                 string pwd = StoredPassword();
                 if (string.IsNullOrEmpty(pwd))
                 {
-                    Logger.Warn("已开启备份加密但取不到本机保存的密码，本次按明文保存");
+                    // 店主 11-08 修正：原来这里只写一条 Warn 然后**按明文保存**。
+                    // 后果是「设置里明明开着备份加密，盘上却躺着明文 .db」——加密成了摆设，
+                    // 而且没人知道。换 Windows 用户、重装系统、DPAPI 失效都会走到这条路。
+                    // 现在的取舍：宁可这次备份没做成并明确报错，也不交付一个假的「已加密」。
+                    TryDelete(target);
+                    Logger.Warn("已开启备份加密但取不到本机保存的密码，本次备份已作废");
+                    throw new BizException(
+                        "已开启备份加密，但本机取不到备份密码（通常是换了 Windows 用户或重装过系统）。" +
+                        "为避免把明文备份写到磁盘上，本次备份已作废。请到「数据备份 → 备份加密」重新设置一次密码。");
                 }
                 else
                 {
@@ -857,13 +865,17 @@ namespace MemberManager.BLL
                 {
                     c1.BackupDatabase(c2, "main", "main", -1, null, 0);
                 }
+
+                // 快照必须**在覆盖活动库之前**封口：这一步可能因为「开着加密但取不到密码」中止，
+                // 放在 File.Copy 之后中止就成了"库已经换了、还告诉你没换"。
+                string snapFinal = SealSnapshot(snap, enc ? password : null);
+
                 SQLiteConnection.ClearAllPools();
                 // 旧 -wal/-shm 不清，会被当成新库的追加内容，恢复出来的数据可能夹带旧页
                 TryDelete(Db.DbPath + "-wal");
                 TryDelete(Db.DbPath + "-shm");
                 File.Copy(plain, Db.DbPath, true);
 
-                string snapFinal = SealSnapshot(snap, enc ? password : null);
                 using (var conn = Db.OpenConnection())
                     W.Log(conn, null, "数据备份", "恢复备份",
                         "恢复自 " + fileName + "，恢复前快照 " + Path.GetFileName(snapFinal));
@@ -876,7 +888,9 @@ namespace MemberManager.BLL
         }
 
         /// <summary>
-        /// 把恢复前快照封口；当前开着加密且拿得到密码时顺手加密，否则保持明文（并记日志）。
+        /// 把恢复前快照封口。开着加密就必须加密，拿不到密码或加密失败一律**中止本次恢复**
+        /// 并删掉明文快照（店主 11-08 修正）——快照会在盘上留到被轮转，明文快照等于把整库
+        /// 明文放在备份目录里，前面所有加密都白做。中止是安全的：此时尚未改动活动库。
         /// </summary>
         private string SealSnapshot(string snapPlain, string password)
         {
@@ -885,8 +899,11 @@ namespace MemberManager.BLL
             string pwd = string.IsNullOrEmpty(password) ? StoredPassword() : password;
             if (string.IsNullOrEmpty(pwd))
             {
-                Logger.Warn("恢复前快照未能加密（没有可用密码），本次快照为明文");
-                return snapPlain;
+                TryDelete(snapPlain);
+                Logger.Warn("恢复前快照无法加密（取不到密码），已中止本次恢复");
+                throw new BizException(
+                    "已开启备份加密，但取不到本机备份密码，无法生成加密的恢复前快照。" +
+                    "为避免留下明文快照，本次恢复已中止（活动库未改动）。请先在「备份加密」里重新设置密码。");
             }
             try
             {
@@ -897,8 +914,9 @@ namespace MemberManager.BLL
             }
             catch (Exception ex)
             {
-                Logger.Warn("恢复前快照加密失败，保留明文快照：" + ex.Message);
-                return snapPlain;
+                TryDelete(snapPlain);
+                Logger.Warn("恢复前快照加密失败，已中止本次恢复：" + ex.Message);
+                throw new BizException("恢复前快照加密失败，已中止本次恢复（活动库未改动）：" + ex.Message);
             }
         }
 

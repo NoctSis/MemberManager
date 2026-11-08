@@ -374,18 +374,28 @@ public static class ResPatcher {
         return ,$out
     }
 
+    # Version resource: read it from AssemblyInfo instead of hardcoding, so a
+    # release bump only has to touch one place (mismatch was already a trap).
+    $av = '1.0.0.0'
+    try {
+        $avFile = Join-Path $script:Root 'src\MemberManager.Shell\Properties\AssemblyInfo.cs'
+        $mav = [regex]::Match([System.IO.File]::ReadAllText($avFile), 'AssemblyVersion\("([0-9.]+)"\)')
+        if ($mav.Success) { $av = $mav.Groups[1].Value }
+    } catch { }
+    Write-Log ('  version resource: ' + $av)
+
     # NOTE: inside @( ... ) the comma binds tighter than '+', so 'a' + $b would be
     # split into TWO elements. Pre-compute any concatenation before the array.
     $verCopy = 'Copyright (C) ' + $mmCn
     $verPairs = @(
         @('CompanyName', $mmCn),
         @('FileDescription', $mmCn),
-        @('FileVersion', '1.0.0.0'),
+        @('FileVersion', $av),
         @('InternalName', 'MemberManager'),
         @('LegalCopyright', $verCopy),
         @('OriginalFilename', 'MemberManager.exe'),
         @('ProductName', $mmCn),
-        @('ProductVersion', '1.0.0.0')
+        @('ProductVersion', $av)
     )
     $strMs = New-Object System.IO.MemoryStream
     foreach ($p in $verPairs) {

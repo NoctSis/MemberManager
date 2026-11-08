@@ -112,8 +112,13 @@ namespace MemberManager.Shell
         }
 
         /// <summary>
-        /// 锁名 = 数据根目录的哈希。用 Local\ 前缀：同一台机器的另一个 Windows 用户
-        /// 有自己的数据目录，互不干扰；而同一用户开两次就会被拦住。
+        /// 锁名 = 数据根目录的哈希。用 Global\ 前缀（店主 11-08 修正）：
+        /// 原来用 Local\ 只在当前登录会话内唯一，**同一台电脑上另一个 Windows 用户
+        /// 拿不到这把锁**。安装版各用各的 %LocalAppData%\MemberManager 目录，确实互不影响；
+        /// 但便携版放在 D:\ 公共目录或 U 盘时，两个用户指向的是**同一个库**，
+        /// 于是能各开一个实例同时写，账会重、库也可能坏。
+        /// 锁名已含数据目录哈希，改成 Global\ 不会误伤不同目录的两份程序。
+        /// 互斥体在 Global\ 下普通用户可创建；万一创建失败，TryAcquire 会放行，不会让人开不了软件。
         /// </summary>
         private static string BuildName()
         {
@@ -130,7 +135,7 @@ namespace MemberManager.Shell
                 for (int i = 0; i < 8; i++) sb.Append(h[i].ToString("x2"));
                 hash = sb.ToString();
             }
-            return "Local\\MemberManager.Single." + hash;
+            return "Global\\MemberManager.Single." + hash;
         }
     }
 }
