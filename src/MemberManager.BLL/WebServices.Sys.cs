@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.IO;
 using MemberManager.Common;
 using MemberManager.DAL;
@@ -625,8 +626,11 @@ namespace MemberManager.BLL
         }
 
         /// <summary>
-        /// 备份轮转（店主 11-05）：备份可以留，但不能无限堆。
-        /// 自动备份留最近 30 个 + 月初份最多再留 2 个；手动备份留最近 30 个；恢复前快照留最近 10 个。
+        /// 备份轮转（店主 11-08 改定）：自动备份只留「最近 2 个自然日 + 上个月最新 1 份」。
+        /// 依据：备份是整库快照，今天的已包含昨天、昨天包含前天，留久了只是成倍占盘；
+        /// 真正需要翻旧账的场景是跨月回溯，所以额外锚一份「上个月最后做的那份」。
+        /// 手动备份留最近 30 个（店主主动点的通常对应月结、大改前等明确用途，不跟着自动份收紧）；
+        /// 恢复前快照留最近 10 个（回退用的安全网，太短就失去意义）。
         /// 只删 backups\ 下的文件，绝不碰活动库；删除动作写日志，可追溯。
         /// </summary>
         public int Rotate(string operatorName)
@@ -654,26 +658,51 @@ namespace MemberManager.BLL
             }
 
             var drop = new List<FileInfo>();
-            // 月初锚点：形如 20261001-2132，第 7~8 位是日，等于 01 就是月初那份。
-            // 店主 11-05 定：**月初份只留最近 2 个**——备份是整库快照，后面的都包含前面的
-            // 全部数据，再往前留只是成倍占盘，没有恢复价值（原来「每月 1 号永久留」一年能堆到十几份）。
-            int monthKept = 0;
-            for (int i = 0; i < auto.Count; i++)
+
+            // 自动备份：按**文件名里的日期**判定，不看 mtime——目录被拷贝/解压过，mtime 整体会变，
+            // 用 mtime 删备份等于掷骰子。也不能靠 files 的排序取「最新那份」：
+            // 那次排序用的是 LastWriteTime，同一天生成的多份 mtime 可能完全一样，顺序就是枚举顺序。
+            DateTime today = DateTime.Today;
+            DateTime keepFrom = today.AddDays(-1);                        // 昨天 00:00 起的都算「两天内」
+            DateTime thisMonthStart = new DateTime(today.Year, today.Month, 1);
+            DateTime lastMonthStart = thisMonthStart.AddMonths(-1);
+
+            var lastMonthCand = new List<KeyValuePair<DateTime, FileInfo>>();
+            bool windowCoveredLastMonth = false;
+            foreach (var f in auto)
             {
-                string n = Path.GetFileNameWithoutExtension(auto[i].Name).Replace("member-", "");
-                bool firstOfMonth = n.Length >= 8 && n.Substring(6, 2) == "01";
-                if (i < 30)
+                DateTime d;
+                if (!TryParseBackupDate(f.Name, out d))
                 {
-                    if (firstOfMonth) monthKept++;   // 落在最近 30 个里的月初份，本来就要留，计入名额
+                    // 认不出日期就绝不删：宁可多占几 MB，也不能把可能唯一的备份删掉
+                    Logger.Warn("备份文件名解析不出日期，按保守策略保留：" + f.Name);
                     continue;
                 }
-                if (firstOfMonth && monthKept < 2)
+                bool inLastMonth = d >= lastMonthStart && d < thisMonthStart;
+                if (d >= keepFrom)
                 {
-                    monthKept++;
+                    // 例：今天 11-01，10-31 的备份已落在两天窗口内，就不该再额外留 10-30 那份
+                    if (inLastMonth) windowCoveredLastMonth = true;
                     continue;
                 }
-                drop.Add(auto[i]);
+                if (inLastMonth) { lastMonthCand.Add(new KeyValuePair<DateTime, FileInfo>(d, f)); continue; }
+                drop.Add(f);
             }
+
+            // 上个月只留**日期最大**的那一份（跨月回溯用）；窗口已覆盖上月时一份都不额外留
+            if (!windowCoveredLastMonth && lastMonthCand.Count > 0)
+            {
+                int keepIdx = 0;
+                for (int i = 1; i < lastMonthCand.Count; i++)
+                    if (lastMonthCand[i].Key > lastMonthCand[keepIdx].Key) keepIdx = i;
+                for (int i = 0; i < lastMonthCand.Count; i++)
+                    if (i != keepIdx) drop.Add(lastMonthCand[i].Value);
+            }
+            else
+            {
+                foreach (var kv in lastMonthCand) drop.Add(kv.Value);
+            }
+
             for (int i = 30; i < manual.Count; i++) drop.Add(manual[i]);
             for (int i = 10; i < snap.Count; i++) drop.Add(snap[i]);
 
@@ -689,11 +718,24 @@ namespace MemberManager.BLL
                 {
                     using (var conn = Db.OpenConnection())
                         W.Log(conn, null, "数据备份", "备份轮转",
-                            "自动清理 " + removed + " 个过期备份（自动留30+月初2份，手动留30，快照留10）");
+                            "自动清理 " + removed + " 个过期备份（自动留最近2天+上月1份，手动留30，快照留10）");
                 }
                 catch { /* 日志写不进去不影响清理结果 */ }
             }
             return removed;
+        }
+
+        /// <summary>
+        /// 从 member-yyyyMMdd-HHmm[-M|-S].db(k) 里取日期。取不到返回 false，
+        /// 调用方必须按「保守保留」处理——删除是不可逆的。
+        /// </summary>
+        private static bool TryParseBackupDate(string fileName, out DateTime date)
+        {
+            date = DateTime.MinValue;
+            string n = Path.GetFileNameWithoutExtension(fileName ?? "");
+            if (n.Length < 15 || !n.StartsWith("member-", StringComparison.OrdinalIgnoreCase)) return false;
+            return DateTime.TryParseExact(n.Substring(7, 8), "yyyyMMdd",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
         }
 
         /// <summary>
@@ -1038,7 +1080,9 @@ namespace MemberManager.BLL
 
         public AutoRow GetAuto()
         {
-            string enabled = DatabaseInitializer.GetSetting("backup_auto_enabled", "0");
+            // 默认开启（店主 11-08）：备份是唯一能救回误删/坏库的东西，不能指望店主自己想起来去开。
+            // 只读「键不存在」时才用默认值——店主显式关过（存了 "0"）的仍然按 "0"，不翻回 1。
+            string enabled = DatabaseInitializer.GetSetting("backup_auto_enabled", "1");
             string hour = DatabaseInitializer.GetSetting("backup_auto_hour", "20");
             int h;
             if (!int.TryParse(hour, out h) || h < 0 || h > 23) h = 20;
@@ -1061,7 +1105,9 @@ namespace MemberManager.BLL
         }
 
         /// <summary>
-        /// D3 每日自动备份：程序启动和定时各调一次。同一天只做一次（日期记在 settings），
+        /// 每日自动备份。调用方有两处：主程序的后台定时器（启动即查一次，之后每小时一次）和
+        /// 「数据备份」页面挂载时。两条路径都靠 backup_last_date 去重，同一天只会真正备份一次；
+        /// 此前只有页面一处调用，店主不进那页就等于没有自动备份（11-08 修）。
         /// 到点（当前小时 >= 设定小时）才执行。返回生成的文件名；未开启 / 未到点 /
         /// 当天已备份都返回空串（调用方据此决定是否提示）。
         /// </summary>

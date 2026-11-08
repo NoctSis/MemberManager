@@ -124,8 +124,44 @@ namespace MemberManager.Shell
                 Logger.Warn("启动时清理操作日志失败（不影响使用）：" + ex.Message);
             }
 
+            // ---- 每日自动备份（店主 11-08）----
+            // 此前只有「数据备份」页面挂载时才会调 AutoTick，店主一天不进那一页就等于没有自动备份，
+            // 而备份是误删/坏库唯一能救命的东西。这里放到主程序后台：启动 30 秒后查一次
+            // （补上昨天错过的），之后每小时一次，软件开着到点就会备份。
+            // 页面那处调用保留：两条路径都靠 backup_last_date 去重，同一天只会真正备份一次。
+            // 失败只记日志、不弹框——自动备份绝不能拦着店主收银。
+            StartAutoBackupTimer();
+
             Application.Run(new ShellForm());
             Logger.Info("程序退出");
+        }
+
+        /// <summary>后台定时器的引用必须自己持有，否则可能被 GC 回收导致定时不再触发。</summary>
+        private static System.Threading.Timer _autoBackupTimer;
+
+        /// <summary>启动每日自动备份的后台轮询（每小时一次；首次延迟 30 秒避开启动高峰）。</summary>
+        private static void StartAutoBackupTimer()
+        {
+            try
+            {
+                _autoBackupTimer = new System.Threading.Timer(_ =>
+                {
+                    try
+                    {
+                        string done = new BackupService().AutoTick("系统自动");
+                        if (!string.IsNullOrEmpty(done)) Logger.Info("自动备份完成：" + done);
+                    }
+                    catch (Exception ex)
+                    {
+                        // 体检失败、磁盘满、加密取不到密码等都在这里兜住：不推进日期，1 小时后重试
+                        Logger.Warn("自动备份失败（不弹框、不影响收银）：" + ex.Message);
+                    }
+                }, null, TimeSpan.FromSeconds(30), TimeSpan.FromHours(1));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("自动备份定时器启动失败（会由备份页面兜底触发）：" + ex.Message);
+            }
         }
 
         /// <summary>无头探针模式下静默处理初始化失败（不弹框）。</summary>

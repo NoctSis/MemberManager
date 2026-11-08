@@ -17,7 +17,7 @@
 
 #define MyAppName      "会员管家"
 #define MyAppExeName   "MemberManager.exe"
-#define MyAppVersion   "1.0.1"
+#define MyAppVersion   "1.0.2"
 #define MyAppPublisher "会员管家"
 
 ; Stable AppId: keeps upgrade / uninstall / start-menu entry tied together.
@@ -32,7 +32,7 @@
 #ifdef LIGHT
   #define OutBase "收银系统-安装程序-轻量版"
 #else
-  #define OutBase "会员管家-安装程序-1.0.1"
+  #define OutBase "会员管家-安装程序-1.0.2"
 #endif
 
 ; ---- paths: all relative to this script (tools\_inno\), so a fresh clone on

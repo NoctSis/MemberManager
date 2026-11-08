@@ -38,7 +38,7 @@ export function BackupPage() {
   const [restoreTarget, setRestoreTarget] = useState<BackupVersion | null>(null)
   const [restoreConfirmText, setRestoreConfirmText] = useState('')
   // D3 每日自动备份
-  const [autoOn, setAutoOn] = useState(false)
+  const [autoOn, setAutoOn] = useState(true)
   const [autoHour, setAutoHour] = useState('20')
   const [autoLast, setAutoLast] = useState('')
   const [backupDir, setBackupDir] = useState('')
@@ -415,7 +415,8 @@ export function BackupPage() {
           </span>
         </div>
         <p className="text-[11px] text-muted-foreground mt-2">
-          程序开着到点即自动备份，一天只做一次；若当天开机已过点，进入本页时会补做一次。
+          程序开着到点就在后台备份，一天只做一次，<span className="text-foreground">不用打开本页</span>；当天错过会在下次检查时补做。
+          自动备份<span className="text-foreground">只保留最近 2 天 + 上个月最新 1 份</span>，要长期留存请用上面的「立即手动备份」（手动备份保留 30 份）。
         </p>
       </SectionCard>
 

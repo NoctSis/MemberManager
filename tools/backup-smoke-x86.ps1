@@ -23,6 +23,15 @@ $log = New-Object 'System.Collections.Generic.List[string]'
 $fail = 0
 $made = ''
 $svcDir = ''
+
+# Redirect the whole data root to a throw-away dir BEFORE any AppPaths call.
+# C11 exercises rotation, and rotation DELETES files -- pointing it at the real
+# beta\backups would destroy real backups, which is irreversible. AppPaths honours
+# MEMBERMANAGER_ROOT when set, so everything (backups/logs/data) lands in temp.
+$tempRoot = Join-Path $env:TEMP ('mm_backup_root_' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+$env:MEMBERMANAGER_ROOT = $tempRoot
+
 function L([string]$m) { $log.Add($m) | Out-Null; Write-Output $m }
 function Chk([string]$n, [bool]$c) { if ($c) { L ('PASS ' + $n) } else { L ('FAIL ' + $n); $script:fail++ } }
 
@@ -66,10 +75,10 @@ try {
     Chk 'B4b-delete-gone-from-list' (-not $still)
     $made = ''
 
-    # ---- B5: auto defaults on a fresh database ----
+    # ---- B5: auto backup defaults ON (owner 11-08: backups must not rely on the owner remembering) ----
     $a0 = $svc.GetAuto()
     L ('  diag B5: enabled=' + $a0.Enabled + ' hour=' + $a0.Hour + ' last=[' + $a0.LastDate + ']')
-    Chk 'B5-auto-default-off-hour20' ($a0.Enabled -eq $false -and $a0.Hour -eq 20)
+    Chk 'B5-auto-default-on-hour20' ($a0.Enabled -eq $true -and $a0.Hour -eq 20)
 
     # ---- B6: set + read back ----
     $svc.SetAuto($true, 7, 'probe')
@@ -314,6 +323,40 @@ try {
     $svc.DisableEncrypt($pwdOk, 'probe')
     Chk 'C10c-state-restored' ($svc.GetEncryptStatus().Enabled -eq $false)
 
+    # ---- C11: rotation keeps only "last 2 days + newest of last month" ----
+    #  The date lives in the file name, so build files with dates relative to today:
+    #    today / yesterday        -> must survive (2-day window)
+    #    100 days ago             -> must go
+    #    last day of last month   -> must survive (cross-month fallback)
+    #    third-to-last of it      -> must go (only ONE older-month file is kept)
+    #  This also covers the month boundary: on the 1st, "yesterday" IS the last day of
+    #  last month, and the assertions still hold (that file survives either way).
+    $now = Get-Date
+    $monthStart = $now.Date.AddDays(1 - $now.Day)
+    $lmLast = $monthStart.AddDays(-1)
+    $lmPrev = $lmLast.AddDays(-2)
+    $nToday = 'member-' + $now.ToString('yyyyMMdd') + '-0300.db'
+    $nYest = 'member-' + $now.AddDays(-1).ToString('yyyyMMdd') + '-0300.db'
+    $nOld = 'member-' + $now.AddDays(-100).ToString('yyyyMMdd') + '-0300.db'
+    $nLmLast = 'member-' + $lmLast.ToString('yyyyMMdd') + '-0300.db'
+    $nLmPrev = 'member-' + $lmPrev.ToString('yyyyMMdd') + '-0300.db'
+    $rotNames = @($nToday, $nYest, $nOld, $nLmLast, $nLmPrev)
+    foreach ($n in $rotNames) {
+        $p = Join-Path $svcDir $n
+        if (-not (Test-Path $p)) { [IO.File]::WriteAllBytes($p, [byte[]]@(0)) }
+    }
+    L ('  diag C11: today=' + $nToday + ' yest=' + $nYest + ' old=' + $nOld + ' lmLast=' + $nLmLast + ' lmPrev=' + $nLmPrev)
+    [void]$svc.Rotate('probe')
+    Chk 'C11a-keep-today' (Test-Path (Join-Path $svcDir $nToday))
+    Chk 'C11b-keep-yesterday' (Test-Path (Join-Path $svcDir $nYest))
+    Chk 'C11c-drop-100-days-ago' (-not (Test-Path (Join-Path $svcDir $nOld)))
+    Chk 'C11d-keep-last-month-newest' (Test-Path (Join-Path $svcDir $nLmLast))
+    Chk 'C11e-drop-last-month-older' (-not (Test-Path (Join-Path $svcDir $nLmPrev)))
+    foreach ($n in $rotNames) {
+        $p = Join-Path $svcDir $n
+        if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+    }
+
     foreach ($f in $encFiles) {
         if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
     }
@@ -338,6 +381,9 @@ finally {
             $p = $tempDb + $ext
             if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
         }
+    }
+    if ($tempRoot -and (Test-Path $tempRoot)) {
+        Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
     [System.IO.File]::WriteAllLines($logPath, $log, (New-Object System.Text.UTF8Encoding($false)))
 }
