@@ -11,10 +11,11 @@ web/node_modules/
 *.db-wal
 *.db-shm
 *.xlsx
-data/
-exports/
-backups/
-logs/
+# 注意：必须锚定到仓库根。裸写 data/ 会把 web/src/data/ 一起忽略（踩过一次）
+/data/
+/exports/
+/backups/
+/logs/
 *.log
 
 # ===== 本地临时/探针产物 =====
