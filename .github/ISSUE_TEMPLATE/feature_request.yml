@@ -1,0 +1,51 @@
+name: 功能建议
+description: 希望增加或改进某个功能
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这个软件是给单店/小店用的线下收银 + 会员管理工具，功能取舍偏「够用、不出错」。
+        建议里说清楚**你现在怎么绕过去的**，比说「希望更好用」有用得多。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及哪块
+      options:
+        - 收银开单 / 挂单
+        - 会员与储值
+        - 次卡与项目
+        - 提成与业绩
+        - 报表与导出
+        - 交接班 / 日结
+        - 备份与恢复
+        - 安装包 / 升级
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 现在哪里不方便
+      placeholder: 例如：每次交接班都要手抄一遍现金数，再敲进软件，容易抄错
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你希望能怎样
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 目前怎么绕过去的（可选）
+    validations:
+      required: false
+  - type: checkboxes
+    id: money
+    attributes:
+      label: 这个改动会不会动到钱
+      options:
+        - label: 会改变金额、余额、业绩或提成的算法
+          required: false

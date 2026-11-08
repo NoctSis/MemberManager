@@ -19,6 +19,11 @@
 *.html    text eol=lf
 *.md      text eol=lf
 
+# GitHub metadata (issue forms, workflows) must stay LF: workflows are parsed on
+# Linux runners and CRLF inside block scalars is easy to get wrong.
+.github/**  text eol=lf
+*.yml       text eol=lf
+
 *.dll     binary
 *.exe     binary
 *.ico     binary

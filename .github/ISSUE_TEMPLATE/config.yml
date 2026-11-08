@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 下载安装包 / 看更新记录
+    url: https://github.com/NoctSis/MemberManager/releases
+    about: 三个包怎么选、更新了什么，都在 Release 页
+  - name: 装不上、开不了、白屏
+    url: https://github.com/NoctSis/MemberManager/blob/main/Windows7%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md
+    about: Windows 7 与老旧机器的排查步骤（含 .NET、WebView2 手动补装）

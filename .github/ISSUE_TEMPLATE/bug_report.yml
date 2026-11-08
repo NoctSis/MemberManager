@@ -1,0 +1,82 @@
+name: 问题反馈
+description: 报告一个可复现的缺陷（收银、会员、备份、安装包等）
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先看一眼 [README 的常见问题](https://github.com/NoctSis/MemberManager#常见问题) 与 [Windows 7 使用说明](https://github.com/NoctSis/MemberManager/blob/main/Windows7%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)。
+
+        **请不要贴真实会员的手机号、姓名、消费记录。** 需要给例子的话，自己改几个数字。
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本
+      description: 首页右下角或「设置 → 关于」里的版本号
+      placeholder: "例如 1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: 用的是哪个包
+      options:
+        - 免安装版（zip，解压即用）
+        - 安装版（Win10 / Win11）
+        - Win7 离线版
+        - 自己从源码编译的
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows 版本
+      description: 开始菜单搜 `winver` 能看到
+      placeholder: "例如 Windows 10 22H2 64 位 / Windows 7 SP1 32 位"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 你做了什么、看到什么、本来应该是什么
+      placeholder: |
+        1. 打开收银台，选了 2 个项目
+        2. 点「会员抵扣」选了张三
+        3. 结账后弹出「余额不足」，但张三余额还有 500
+    validations:
+      required: true
+  - type: textarea
+    id: expect
+    attributes:
+      label: 你期望的结果
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志（可选，但很有用）
+      description: 程序目录下 `logs\` 里最新那份，把**报错行附近**的几十行贴上来即可，不用整份
+      render: text
+    validations:
+      required: false
+  - type: dropdown
+    id: data
+    attributes:
+      label: 这个问题会影响账目吗
+      description: 例如金额、余额、业绩、提成对不上；不影响就选「不影响」
+      options:
+        - 不影响，只是界面或操作不顺手
+        - 会影响，数字对不上（请在下面补充）
+        - 不确定
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我没有在内容里包含真实的会员手机号、姓名等个人信息
+          required: true
+        - label: 我搜过已有的 Issue，没有重复
+          required: true
