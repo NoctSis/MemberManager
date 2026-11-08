@@ -1,0 +1,52 @@
+# ===== 构建产物（可随时重新生成）=====
+beta/
+release/
+web/dist/
+src/*/bin/
+src/*/obj/
+web/node_modules/
+
+# ===== 运行数据（真实营业数据，绝不入库）=====
+*.db
+*.db-wal
+*.db-shm
+*.xlsx
+data/
+exports/
+backups/
+logs/
+*.log
+
+# ===== 本地临时/探针产物 =====
+tools/*.png
+tools/*.png.res
+tools/*.txt
+!tools/_smoke_runner.ps1
+!tools/README.md
+
+# ===== IDE/系统杂项 =====
+.vs/
+.vis/
+*.user
+Thumbs.db
+.DS_Store
+
+# 冒烟测试产物（tools 下的临时验证文件）
+tools/_*.json
+tools/_*.xlsx
+tools/_bllout/
+tools/_dalout/
+
+# 观察框架生成的报告（每天一份，不入库）
+observe/report-*.html
+observe/sample-data.json
+observe/push.json
+observe/_t/
+observe/relay.json
+observe/cloud/token.txt
+observe/cloud/datakey.txt
+observe/cloud/keys.json
+observe/cloud/*.log
+
+# build inputs: WebView2 runtime 109 + .NET 4.8 offline (500MB, not source)
+deps/

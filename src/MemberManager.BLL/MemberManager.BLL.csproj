@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
+    <ProjectGuid>{A1B2C3D4-1111-4000-8000-000000000004}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>MemberManager.BLL</RootNamespace>
+    <AssemblyName>MemberManager.BLL</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <LangVersion>7.3</LangVersion>
+    <FileAlignment>512</FileAlignment>
+    <CscToolPath Condition="'$(MSBuildToolsVersion)' == '4.0'">$(MSBuildProjectDirectory)\..\..\tools\roslyn</CscToolPath>
+    <CscToolExe Condition="'$(MSBuildToolsVersion)' == '4.0'">csc.exe</CscToolExe>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
+    <OutputPath>bin\Debug\</OutputPath>
+    <PlatformTarget>x86</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
+    <OutputPath>bin\Release\</OutputPath>
+    <PlatformTarget>x86</PlatformTarget>
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Data.SQLite">
+      <HintPath>..\..\lib\SystemDataSQLite\System.Data.SQLite.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <!-- Excel 导出（ExcelWriter 用 ZipArchive 手写 .xlsx，走框架自带的 System.IO.Compression，零第三方依赖） -->
+    <Reference Include="System.IO.Compression" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MemberManager.Models\MemberManager.Models.csproj">
+      <Project>{A1B2C3D4-1111-4000-8000-000000000001}</Project>
+      <Name>MemberManager.Models</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\MemberManager.Common\MemberManager.Common.csproj">
+      <Project>{A1B2C3D4-1111-4000-8000-000000000002}</Project>
+      <Name>MemberManager.Common</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\MemberManager.DAL\MemberManager.DAL.csproj">
+      <Project>{A1B2C3D4-1111-4000-8000-000000000003}</Project>
+      <Name>MemberManager.DAL</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

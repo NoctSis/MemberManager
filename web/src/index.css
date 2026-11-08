@@ -1,0 +1,227 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+  /* 单机版固定浅色：React 挂载前也保持白底首帧（原先靠 Windows 主题媒体查询，
+     改为无条件 —— WebView2 侧不再使用 Profile.PreferredColorScheme，见 ShellForm）。 */
+  background-color: #ffffff;
+}
+
+/* ---------- 小票打印：平时隐藏 .receipt-print，打印时只显示它 ----------
+   小票由 WebView2 原生 PrintAsync / PrintToPdfStream 打印（见 ShellForm.PrintReceipt）。 */
+.receipt-print {
+  display: none;
+}
+@media print {
+  body {
+    background: #fff !important;
+  }
+  /* 隐藏整棵 App/Modal 树，再单独把小票显示出来（子元素 visibility:visible 会盖过父级 hidden） */
+  body * {
+    visibility: hidden !important;
+  }
+  .receipt-print,
+  .receipt-print * {
+    visibility: visible !important;
+  }
+  .receipt-print {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    text-align: center !important;
+  }
+  /* 抵消前端写死的 w-[300px]（≈79mm）：任意纸宽（50/58/80mm）下都填满，不溢出被裁；
+     屏幕观感仍是 79mm 小票（此条仅在打印媒体生效）。 */
+  .receipt-print > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    box-sizing: border-box !important;
+    text-align: left !important;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;  /* shadcn 基础层兜底: 没写显式 text-x / bg-x 的文字和表面 (textarea 输入文字、
+     placeholder、气泡正文) 从这里继承主题色, 不依赖 UA 默认色.
+     烧主题前 token 未定义时这两行按无效值优雅回退, 无副作用. */
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* 中英混排对齐:一行里英文(尤其 ds 的 display/像素字体如 Press Start 2P)和中文(系统黑体)
+   混在一起时,英文会偏小、偏上,跟中文对不齐。把纯英文/数字那一截用 <span className="cjk-latin">
+   包起来即可统一对齐:font-size-adjust 拉平字号,vertical-align 把英文下移到与中文同基线。
+   --cjk-latin-shift 由 design_picker 按 ds 烧进 :root(默认 -0.15em);极个别字体偏差大改这一个值。 */
+
+/* ---------- 交互屏蔽(09-29 店主定:屏蔽文字选中 + 按住鼠标拖页面即滚动) ----------
+   收银/后台不是文档,用户不需要复制文字;按住拖动翻页比找滚动条快。
+   输入类元素必须保留默认可选,否则在输入框里没法选词改写,所以逐条显式放行。
+   拖拽翻页本身的逻辑在 lib/scrollDrag.ts;需要局部放行滚动时在元素上加 data-no-drag-scroll。 */
+* {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  /* 顺带关掉鼠标拖拽图标的默认幽灵图(链接/图片被误拖出来) */
+  -webkit-user-drag: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable=""],
+[data-selectable] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+/* 按住 Ctrl 暂时放开选中（scrollDrag.ts 会在按住期间给 body 挂上这个类），
+   方便复制单号、手机号；松开 Ctrl 立刻回到不可选状态 */
+body.is-selecting,
+body.is-selecting * {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+.cjk-latin {
+  font-size-adjust: 0.56;
+  vertical-align: var(--cjk-latin-shift, -0.15em);
+}
+
+/* ---------- 弹窗入场（createPortal 到 body，整屏遮罩 + 轻缩放淡入，观感更「盖得住」） ---------- */
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+.modal-in { animation: modal-in 0.16s ease-out; }
+
+@layer components {
+  /* ============================================================
+     页面布局统一类（店主 11-04）
+     
+     ★ 控件分型定则（店主 11-04「按控件展示什么来区分」）：
+       数据区（表格/列表/项目选择）→ flex-1，跟随窗口
+       控件区（按钮/输入框/筛选）  → 固定尺寸，不跟着拉伸
+       信息区（指标卡/摘要/合计）  → 固定高度，可换行
+       三栏/多栏布局时：各栏用 min-w + max-w 限定弹性范围，
+       不要用固定 w-[Npx]（窗口大了不跟着长，空间全挤到一栏）。
+     放在 @layer components 里 → Tailwind 工具类（@layer utilities）能覆盖。
+     裸 CSS 优先级高于 layer，会压过 flex-1/shrink-0，导致表格不撑开。
+     ============================================================ */
+
+  /* A 长列表页：flex 纵向，gap 1rem，表格区（.page-body）吃满剩余 */
+  .page-fill {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 1.25rem 1.25rem 0;
+    gap: 1rem;
+  }
+  /* 直接子元素默认不压缩（固定区），但 .page-body 是例外 */
+  .page-fill > * { flex-shrink: 0; }
+  .page-fill .page-body {
+    flex: 1 1 0%;
+    min-height: 0;
+    flex-shrink: 1 !important; /* 覆盖 .page-fill > * 的 shrink-0 */
+  }
+
+  /* B 滚动页：内容多时页内滚动，间距 1rem */
+  .page-scroll {
+    padding: 1.25rem;
+    overflow-y: auto;
+    height: 100%;
+  }
+  .page-scroll > * + * { margin-top: 1rem; }
+}  /* 等价 space-y-4 */
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --background: 222 47% 96%;
+    --foreground: 220 43% 11%;
+    --card-foreground: 220 43% 11%;
+    --popover-foreground: 220 43% 11%;
+    --card: 0 0% 100%;
+    --popover: 0 0% 100%;
+    --secondary: 220 100% 96%;
+    --muted: 220 100% 96%;
+    --accent: 220 100% 96%;
+    --secondary-foreground: 218 24% 27%;
+    --accent-foreground: 218 24% 27%;
+    --muted-foreground: 221 13% 46%;
+    --border: 218 43% 89%;
+    --input: 218 43% 89%;
+    --primary: 221 83% 53%;
+    --ring: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+
+    /* 图表配色（10-08 店主定）：营收构成三块必须一眼分得开。
+       原先用的是 --primary 的不同透明度，深浅同色系看不出谁是谁，已废弃。 */
+    --chart-1: 221 83% 53%;  /* 散单 —— 品牌蓝 */
+    --chart-2: 32 95% 50%;   /* 项目 —— 琥珀橙 */
+    --chart-3: 172 74% 38%;  /* 充值 —— 青绿 */
+
+    /* 圆角 / 阴影 / 字体：以下 9 个是全项目 var() 实际引用到的 */
+    --radius-md: 16px;
+    --radius-pill: 9999px;
+    --radius-sm: 10px;
+    --elev-raised: 0 20px 52px rgba(16, 24, 40, 0.11);
+    --elev-ring: 0 0 0 1px var(--border);
+    --focus-ring: 0 0 0 4px rgba(37, 99, 235, 0.22);
+    --font-display: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    --font-body: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    --cjk-latin-shift: -0.15em;
+
+    /* ---------- 字号阶梯（10-12 定，单一真源，替代随手填魔法值）----------
+       正文/表格 13 · 次要/标签 12 · 脚注/徽标 11 · 极小/单位 10。
+       现有 161 处 text-[11px/10px/13px/12px] 已落在这四档上，无需改；
+       新增字号一律取这四档（可用 text-[length:var(--fs-*)] 或裸 text-[11px] 等），
+       禁止再填 9 / 14 / 15 等离格值（店铺名、价格强调这类「展示档」例外，见各页）。 */
+    --fs-body: 13px;   /* 正文 / 表格 */
+    --fs-label: 12px;  /* 次要 / 标签 */
+    --fs-note: 11px;   /* 脚注 / 徽标（最常用小字） */
+    --fs-unit: 10px;   /* 极小 / 单位 */
+  }
+
+  body { font-family: var(--font-body); }
+}
+
+
+/* ============ 打印日报 ============
+   只打报表正文：外壳（顶栏/左侧导航/底栏）用 Tailwind 的 print:hidden 关掉，
+   这里补页面边距、A4 纸、以及把滚动容器改成自动高度（否则超出第一页的内容会整个丢失）。 */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  /* 报表页原本被外壳的 h-screen + overflow-hidden 截断，打印时必须放开 */
+  .h-screen,
+  .overflow-hidden {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .overflow-y-auto {
+    overflow: visible !important;
+  }
+  /* 阴影/环形描边在纸上只会变成灰框 */
+  .shadow-\[--elev-ring\],
+  .shadow-\[--elev-raised\] {
+    box-shadow: none !important;
+  }
+}

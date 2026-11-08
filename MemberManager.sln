@@ -1,0 +1,45 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MemberManager.Models", "src\MemberManager.Models\MemberManager.Models.csproj", "{A1B2C3D4-1111-4000-8000-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MemberManager.Common", "src\MemberManager.Common\MemberManager.Common.csproj", "{A1B2C3D4-1111-4000-8000-000000000002}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MemberManager.DAL", "src\MemberManager.DAL\MemberManager.DAL.csproj", "{A1B2C3D4-1111-4000-8000-000000000003}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MemberManager.BLL", "src\MemberManager.BLL\MemberManager.BLL.csproj", "{A1B2C3D4-1111-4000-8000-000000000004}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MemberManager.Shell", "src\MemberManager.Shell\MemberManager.Shell.csproj", "{A1B2C3D4-1111-4000-8000-000000000006}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A1B2C3D4-1111-4000-8000-000000000001}.Debug|x86.ActiveCfg = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000001}.Debug|x86.Build.0 = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000001}.Release|x86.ActiveCfg = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000001}.Release|x86.Build.0 = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000002}.Debug|x86.ActiveCfg = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000002}.Debug|x86.Build.0 = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000002}.Release|x86.ActiveCfg = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000002}.Release|x86.Build.0 = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000003}.Debug|x86.ActiveCfg = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000003}.Debug|x86.Build.0 = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000003}.Release|x86.ActiveCfg = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000003}.Release|x86.Build.0 = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000004}.Debug|x86.ActiveCfg = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000004}.Debug|x86.Build.0 = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000004}.Release|x86.ActiveCfg = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000004}.Release|x86.Build.0 = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000006}.Debug|x86.ActiveCfg = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000006}.Debug|x86.Build.0 = Debug|x86
+		{A1B2C3D4-1111-4000-8000-000000000006}.Release|x86.ActiveCfg = Release|x86
+		{A1B2C3D4-1111-4000-8000-000000000006}.Release|x86.Build.0 = Release|x86
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
