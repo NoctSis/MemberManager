@@ -63,6 +63,9 @@ namespace MemberManager.Shell
                     return;
                 }
                 Logger.Info("单实例锁已取得（数据目录：" + AppPaths.RootDir + "）");
+                // 给安装包（setup.iss 的 AppMutex）留一个固定名的记号，
+                // 升级时它才能提示「请先关闭会员管家」，而不是复制文件到一半报占用。
+                SingleInstance.MarkRunning();
             }
 
             // ---- 启动自检：数据库初始化 ----

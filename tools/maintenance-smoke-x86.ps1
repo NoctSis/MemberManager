@@ -242,6 +242,10 @@ try {
         -not [string]::IsNullOrWhiteSpace($stRun.RunModeDesc) -and
         -not [string]::IsNullOrWhiteSpace($stRun.WebViewKernel))
     Check 'G9 mode key is a known value' (@('portable', 'win7', 'normal', 'loose') -contains $stRun.RunModeKey)
+    # G10: version comes from the entry assembly so the About card cannot drift
+    # from the shipped build again (it used to be hardcoded "v1.0").
+    Say ('status version=' + $stRun.Version)
+    Check 'G10 status carries real version' ($stRun.Version -match '^\d+\.\d+\.\d+$')
 
     # ---------------- H) clear = void the held order (11-05 owner decision) ----------------
     # Must run AFTER section D: D compares a raw SQL count of held orders with the

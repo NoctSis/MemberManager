@@ -703,6 +703,8 @@ export interface SysStatus {
   BackupDir: string
   DbPath: string
   ExportDir: string
+  /** 程序真实版本，如 "1.0.3"（后端读 AssemblyFileVersion） */
+  Version: string
 }
 
 export const system = {
@@ -720,6 +722,8 @@ export const system = {
   pickOpenFile: (filter = ''): Promise<string> => invoke('system', 'PickOpenFile', [filter]),
   /** 当前生效的默认导出目录（全局 export_dir，未设则兜底 data\exports） */
   exportDir: (): Promise<string> => invoke('system', 'GetExportDir', []),
+  /** 用系统默认浏览器打开外部链接（项目主页等）。后端只放行 http/https */
+  openUrl: (url: string): Promise<void> => invoke('system', 'OpenUrl', [url]),
   /** 重启软件：导入数据后设置/账号/权限都换了，必须让内存里的旧值丢掉（后端启动新进程后退出当前进程） */
   restart: (): Promise<void> => invoke('system', 'Restart', []),
   /** 打印当前页面（收银小票）：走 WebView2 原生 ShowPrintUI，弹系统打印对话框；无实体机可选「Microsoft Print to PDF」 */

@@ -34,6 +34,25 @@ namespace MemberManager.Shell
         private static Mutex _mutex;
 
         /// <summary>
+        /// 「程序正在运行」的固定标记，专门给安装包看（setup.iss 的 AppMutex）。
+        /// <para>
+        /// 为什么要单独一个名字：单实例锁是按数据目录哈希派生的，安装程序无法预知哈希，
+        /// 也就没法用 AppMutex 去等它。而升级安装必须先关掉程序——它握着 exe/dll 的句柄，
+        /// 还有 data\member.db；不关就装会在复制文件时报「正由另一进程使用」，
+        /// 店主看到的是任务管理器里一堆 msedgewebview2.exe，不知道该结束哪个。
+        /// </para>
+        /// <para>
+        /// 同时建 Global\ 与 Local\：Global\ 覆盖「另一个 Windows 用户也开着」的情况，
+        /// Local\ 是 Global\ 建不出来时的退路。安装包两个名字都登记，命中任一即提示。
+        /// 这个互斥体不 WaitOne，只要句柄活着对象就存在，进程退出时内核自动回收。
+        /// </para>
+        /// </summary>
+        private static Mutex _running;
+
+        private const string RunningGlobal = "Global\\MemberManager.Running";
+        private const string RunningLocal = "Local\\MemberManager.Running";
+
+        /// <summary>
         /// 尝试取得独占权。waitMs = 0 表示立即返回；&gt;0 用于「重启软件」场景，等旧进程体面退出。
         /// 返回 false 表示已有实例在跑。
         /// </summary>
@@ -102,9 +121,37 @@ namespace MemberManager.Shell
             return false;
         }
 
+        /// <summary>
+        /// 立「程序正在运行」的标记，让安装包知道该先提示关闭。
+        /// 必须在确认能继续运行之后调用（重复启动的那次不调，避免第二个进程替第一个背标记）。
+        /// 建不出来只记日志：装的时候最多退回到「靠文件占用报错」，不影响软件本身。
+        /// </summary>
+        public static void MarkRunning()
+        {
+            if (_running != null) return;
+            try
+            {
+                _running = new Mutex(false, RunningGlobal);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("运行标记（Global）创建失败，改用 Local：" + ex.Message);
+                try { _running = new Mutex(false, RunningLocal); }
+                catch (Exception ex2)
+                {
+                    Logger.Warn("运行标记（Local）也创建失败，安装时将无法提前识别本程序在运行：" + ex2.Message);
+                }
+            }
+        }
+
         /// <summary>释放锁（进程退出时内核也会自动释放，这里只是让「重启」路径更快放开）。</summary>
         public static void Release()
         {
+            if (_running != null)
+            {
+                try { _running.Dispose(); } catch { }
+                _running = null;
+            }
             if (_mutex == null) return;
             try { _mutex.ReleaseMutex(); } catch { /* 未持有或已释放，忽略 */ }
             try { _mutex.Dispose(); } catch { }

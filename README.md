@@ -21,13 +21,17 @@
 
 | 包（Release 上的文件名） | 体积 | 适合谁 | 说明 |
 | --- | --- | --- | --- |
-| `MemberManager-1.0.2-install-win10-11.zip`<br>安装版 | 约 3 MB | **Windows 10 / 11 用户（推荐）** | 解压后双击安装。不带运行环境，要求电脑已装 .NET 4.8 和 WebView2（Win10 1803 以后基本都自带）。缺了会明确提示你装哪个。 |
-| `MemberManager-1.0.2-win7-offline.zip`<br>Win7 离线版 | 约 284 MB | **Windows 7 用户**，以及完全断网的电脑 | 解压后双击安装。内置 .NET Framework 4.8 离线包和 WebView2 109 运行时，断网也能一次装完。 |
-| `MemberManager-1.0.2-portable.zip`<br>免安装版 | 约 1.8 MB | 想先试一试、要放 U 盘带着跑 | 解压即用，双击 `MemberManager.exe` 就行，不写注册表。同样要求电脑已有运行环境。 |
+| `MemberManager-1.0.3-install-win10-11.zip`<br>安装版 | 约 3 MB | **Windows 10 / 11 用户（推荐）** | 解压后双击安装。不带运行环境，要求电脑已装 .NET 4.8 和 WebView2（Win10 1803 以后基本都自带）。缺了会明确提示你装哪个。 |
+| `MemberManager-1.0.3-win7-offline.zip`<br>Win7 离线版 | 约 284 MB | **Windows 7 用户**，以及完全断网的电脑 | 解压后双击安装。内置 .NET Framework 4.8 离线包和 WebView2 109 运行时，断网也能一次装完。 |
+| `MemberManager-1.0.3-portable.zip`<br>免安装版 | 约 1.8 MB | 想先试一试、要放 U 盘带着跑 | 解压即用，双击 `MemberManager.exe` 就行，不写注册表。同样要求电脑已有运行环境。 |
 
 **怎么选**：Win10/11 装「安装版」；Win7 或用的是没有网络的电脑，装「Win7离线版」；只想先看看界面，用「免安装版」。
 
-> Release 页上的文件名是 ASCII（`MemberManager-1.0.2-install-win10-11.zip` 等），因为 GitHub 会过滤中文文件名；
+> **升级只下 3 MB 的小包就行。** 三个包里的程序本体完全一样，284 MB 那个多出来的只有运行环境
+> （.NET 4.8 + WebView2 109）。**Win7 电脑装过一次离线版之后，以后再升级直接下「安装版」覆盖安装即可**，
+> 程序目录里的 `runtime\` 不会被删掉。反过来说：不要先卸载再装新版，卸载会把内核一起带走。
+
+> Release 页上的文件名是 ASCII（`MemberManager-1.0.3-install-win10-11.zip` 等），因为 GitHub 会过滤中文文件名；
 > 下载解压后里面仍是中文名字的安装程序，功能完全一致。
 
 > 免安装版没有卸载程序，删除文件夹即卸载（数据在文件夹里，先备份）。

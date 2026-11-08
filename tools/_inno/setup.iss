@@ -17,7 +17,7 @@
 
 #define MyAppName      "会员管家"
 #define MyAppExeName   "MemberManager.exe"
-#define MyAppVersion   "1.0.2"
+#define MyAppVersion   "1.0.3"
 #define MyAppPublisher "会员管家"
 
 ; Stable AppId: keeps upgrade / uninstall / start-menu entry tied together.
@@ -32,7 +32,7 @@
 #ifdef LIGHT
   #define OutBase "收银系统-安装程序-轻量版"
 #else
-  #define OutBase "会员管家-安装程序-1.0.2"
+  #define OutBase "会员管家-安装程序-1.0.3"
 #endif
 
 ; ---- paths: all relative to this script (tools\_inno\), so a fresh clone on
@@ -71,6 +71,13 @@ PrivilegesRequired=lowest
 ; shop PCs still run an unserviced Win7 and we would rather let them try than
 ; hard-refuse them at the installer door.
 MinVersion=6.1
+; Program.MarkRunning() holds these while the app is open. Checking them lets
+; Setup say "please close 会员管家" (with a Retry button) instead of failing
+; halfway through copying files, which is what happens if the exe is locked --
+; and on this app the user cannot tell which of the many msedgewebview2.exe
+; processes is the one to kill. Both names are registered: Global\ covers
+; "another Windows user has it open", Local\ is the fallback path.
+AppMutex=Global\MemberManager.Running,Local\MemberManager.Running
 OutputDir={#RepoRoot}\release
 OutputBaseFilename={#OutBase}
 ; The 191MB msedge.dll is the stress case: ISCC.exe is a 32-bit process, so
@@ -164,6 +171,40 @@ begin
     Result := (Release >= DotNet48Release);
 end;
 
+// Is there an msedgewebview2.exe one level down (Application\<version>\)?
+function HasWebView2Under(const Root: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := False;
+  if not DirExists(Root) then exit;
+  if FindFirst(AddBackslash(Root) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+          if FileExists(AddBackslash(AddBackslash(Root) + FindRec.Name) + 'msedgewebview2.exe') then
+            Result := True;
+      until Result or (not FindNext(FindRec));
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+// Does this machine already have a WebView2 runtime the app can use?
+// Mirrors ShellForm.ResolveRuntimeFolder(): <app>\runtime first, then the
+// system-wide Edge install. The light build bundles none of this.
+function HasWebView2(): Boolean;
+begin
+  Result := True;
+  if FileExists(ExpandConstant('{app}\runtime\msedgewebview2.exe')) then exit;
+  if HasWebView2Under(ExpandConstant('{pf}\Microsoft\EdgeWebView\Application')) then exit;
+  if HasWebView2Under(ExpandConstant('{pf32}\Microsoft\EdgeWebView\Application')) then exit;
+  if HasWebView2Under(ExpandConstant('{localappdata}\Microsoft\EdgeWebView\Application')) then exit;
+  Result := False;
+end;
+
 procedure OpenUrl(Url: String);
 var
   ErrorCode: Integer;
@@ -187,22 +228,41 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
   DotNetPath: String;
+  HasNet: Boolean;
 begin
   Result := '';
-  if HasDotNet48() then
+  HasNet := HasDotNet48();
+
+#ifdef LIGHT
+  // Light build bundles neither runtime, so both have to come from the machine.
+  // Pointing a Windows 7 user at Microsoft's download page is a dead end: the
+  // Evergreen bootstrapper refuses to run there and only the fixed 109 build
+  // works, which is exactly what the offline package ships. So check up front
+  // and name the piece that is actually missing.
+  if not HasWebView2() then
+  begin
+    Result := '这台电脑没有找到 Edge 浏览器内核（WebView2 Runtime），轻量版安装包没有自带。' + NL + NL +
+              '· Windows 7：请改用「Win7 离线版」安装包，它自带内核 109，装完就能用。' + NL +
+              '· Windows 10 / 11：请先安装 Microsoft Edge（系统一般自带）。' + NL + NL +
+              '提示：如果之前装过「Win7 离线版」，升级时请不要先卸载，直接覆盖安装会保留内核。';
+    exit;
+  end;
+  if not HasNet then
+  begin
+    Result := '这台电脑缺少 .NET Framework 4.8，轻量版安装包没有自带运行环境。' + NL + NL +
+              '· Windows 7：请改用「Win7 离线版」安装包（自带 4.8，断网也能装）。' + NL +
+              '· Windows 10 / 11：请先安装 .NET Framework 4.8（微软官网免费下载）。';
+    exit;
+  end;
+  Log('Light build: system WebView2 and .NET 4.8 both present, nothing to install');
+  exit;
+#endif
+
+  if HasNet then
   begin
     Log('.NET 4.8 already present, skipping bundled installer');
     exit;
   end;
-
-#ifdef LIGHT
-  // Light build ships no offline package. Say so plainly instead of failing on a
-  // missing ExtractTemporaryFile.
-  Result := '这台电脑缺少 .NET Framework 4.8，轻量版安装包没有自带运行环境。' + NL +
-            NL +
-            '请先安装 .NET Framework 4.8（微软官网免费下载），或改用「Win7 离线版」安装包。';
-  exit;
-#endif
 
   WizardForm.StatusLabel.Caption := '正在安装运行环境 .NET Framework 4.8（首次安装需几分钟）…';
   WizardForm.StatusLabel.Update;

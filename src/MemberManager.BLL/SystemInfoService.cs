@@ -32,6 +32,7 @@ namespace MemberManager.BLL
             public string BackupDir;
             public string DbPath;
             public string ExportDir;    // 当前生效的默认导出目录（全局 export_dir，未设则兜底 data\exports）
+            public string Version;      // 程序真实版本（取 AssemblyFileVersion，界面上不再写死）
         }
 
         public StatusInfo GetStatus()
@@ -68,7 +69,51 @@ namespace MemberManager.BLL
                 info.JournalMode = "?";
             }
             info.LastBackup = GetLastBackupText();
+            info.Version = ReadVersion();
             return info;
+        }
+
+        /// <summary>
+        /// 程序真实版本，如 "1.0.3"。取入口程序集的 AssemblyFileVersion。
+        /// 原来界面上写死「v1.0」，发到 1.0.3 还显示 1.0，店主报问题时说不清用的是哪版。
+        /// </summary>
+        private static string ReadVersion()
+        {
+            try
+            {
+                var asm = System.Reflection.Assembly.GetEntryAssembly()
+                          ?? System.Reflection.Assembly.GetExecutingAssembly();
+                Version v = asm.GetName().Version;
+                if (v == null) return "";
+                return v.Major + "." + v.Minor + "." + (v.Build < 0 ? 0 : v.Build);
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// 用系统默认浏览器打开外部链接（项目主页 / 问题反馈）。
+        /// 只放行 http/https —— 这个入口最终会走 shell 执行，绝不能让前端传个
+        /// 本地 exe 路径进来把它当程序启动。
+        /// </summary>
+        public void OpenUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) throw new BizException("链接为空");
+            string u = url.Trim();
+            if (!u.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+                !u.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                throw new BizException("只能打开 http/https 链接");
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(u);
+                psi.UseShellExecute = true;
+                System.Diagnostics.Process.Start(psi);
+                Logger.Info("打开外部链接：" + u);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("打开外部链接失败：" + u, ex);
+                throw new BizException("打开链接失败：" + ex.Message + "（可以手动复制到浏览器打开）");
+            }
         }
 
         private static string GetLastBackupText()

@@ -14,6 +14,13 @@ import type { DataTableCol } from '@/components/common/ui'
 import { settings as apiSettings, perm as apiPerm, system as apiSystem, logs as apiLogs, initDayCut } from '@/lib/api'
 import type { LogStats } from '@/lib/api'
 
+/**
+ * 开源仓库地址。放在「关于」里，一是让店主知道这软件从哪来、出事找谁，
+ * 二是换电脑时能自己下到最新版 —— 软件不联网，没法自动检查更新，
+ * 把这个链接摆出来是最省事的替代。
+ */
+const REPO_URL = 'https://github.com/NoctSis/MemberManager'
+
 /** 账号密码 5 列预算（≈760px，不横滚）；操作列 4 按钮预留 280 */
 const ACCOUNT_COLS: DataTableCol[] = [
   { key: 'name', title: '姓名', width: 150, cellClass: 'font-medium' },
@@ -268,6 +275,9 @@ export function SettingsPage() {
     kernel: '',
   })
   const [loaded, setLoaded] = useState(false)
+  // 程序真实版本（后端 AssemblyFileVersion）。原来这里是写死的「v1.0」，
+  // 发到 1.0.3 界面上还显示 1.0，店主报问题时说不清用的是哪一版。
+  const [version, setVersion] = useState('')
   // 开机自启存在注册表（壳层），与 settings 表无关 —— 单独加载；读不到就按未开启显示
   const [autostart, setAutostart] = useState(false)
   // 默认导出位置（全局 export_dir；4 个导出默认都落这里，改一次即成新默认）—— 复用共享 hook，单一来源
@@ -290,6 +300,7 @@ export function SettingsPage() {
         })
         if (s.ShopName) setName(s.ShopName)
         if (s.ShopPhone) setPhone(s.ShopPhone)
+        setVersion(s.Version || '')
       })
       .catch(() => setPaths(FALLBACK_PATHS))
   }, [])
@@ -734,7 +745,7 @@ export function SettingsPage() {
             <div className="text-xs space-y-1.5">
               <p className="flex justify-between gap-3">
                 <span className="text-muted-foreground shrink-0">版本</span>
-                <span className="text-right">收银系统 v1.0（单店单机版）</span>
+                <span className="text-right">收银系统 v{version || '—'}（单店单机版）</span>
               </p>
               <p className="flex justify-between gap-3">
                 <span className="text-muted-foreground shrink-0">运行环境</span>
@@ -749,6 +760,23 @@ export function SettingsPage() {
                 <span className="text-right text-primary inline-flex items-center gap-1 justify-end">
                   <AlertCircle size={12} /> 完全离线可用，无需联网
                 </span>
+              </p>
+              {/* 软件不联网就查不到新版，这里给个能点的入口：
+                  点一下用系统浏览器打开项目主页，能下载最新安装包、看改了什么。 */}
+              <p className="flex justify-between gap-3 items-start">
+                <span className="text-muted-foreground shrink-0">项目主页</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    apiSystem
+                      .openUrl(REPO_URL)
+                      .catch((e) => toast.error(String(e) + '（地址：' + REPO_URL + '）'))
+                  }
+                  className="text-primary hover:underline text-right break-all leading-snug"
+                  title={'在浏览器中打开：' + REPO_URL + '\n源码、更新记录、问题反馈、最新安装包'}
+                >
+                  github.com/NoctSis/MemberManager
+                </button>
               </p>
             </div>
           </SectionCard>
