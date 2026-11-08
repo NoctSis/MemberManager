@@ -526,11 +526,12 @@ export const perm = {
 
 export const backup = {
   list: async (): Promise<BackupVersion[]> => {
-    const rows = await invoke<{ Id: number; Time: string; Type: string; Size: string; Note: string; FileName: string }[]>('backup', 'List', [])
-    return rows.map((r) => ({ id: r.Id, time: r.Time, type: r.Type as BackupVersion['type'], size: r.Size, note: r.Note, fileName: r.FileName })) as BackupVersion[]
+    const rows = await invoke<{ Id: number; Time: string; Type: string; Size: string; Note: string; FileName: string; Encrypted: boolean }[]>('backup', 'List', [])
+    return rows.map((r) => ({ id: r.Id, time: r.Time, type: r.Type as BackupVersion['type'], size: r.Size, note: r.Note, fileName: r.FileName, encrypted: !!r.Encrypted })) as BackupVersion[]
   },
   backupNow: (manual: boolean): Promise<string> => invoke('backup', 'BackupNow', [manual, op()]),
-  restore: (fileName: string): Promise<string> => invoke('backup', 'Restore', [fileName, op()]),
+  /** 恢复备份；加密备份（.dbk）必须带密码，明文备份传空串 */
+  restore: (fileName: string, password = ''): Promise<string> => invoke('backup', 'Restore', [fileName, op(), password]),
   // D4: delete a backup version (never touches the live database)
   remove: (fileName: string): Promise<void> => invoke('backup', 'Delete', [fileName, op()]),
   // D3: daily auto backup config + tick
@@ -540,6 +541,20 @@ export const backup = {
   },
   setAuto: (enabled: boolean, hour: number): Promise<void> => invoke('backup', 'SetAuto', [enabled, hour, op()]),
   autoTick: (): Promise<string> => invoke('backup', 'AutoTick', [op()]),
+
+  /* --- 备份加密（店主 11-08） --- */
+
+  /** 加密状态：是否开启、有没有设过密码、密码提示、加密/明文备份各有几份 */
+  encryptStatus: async (): Promise<{ enabled: boolean; hasPassword: boolean; hint: string; backupCount: number; plainCount: number }> => {
+    const r = await invoke<{ Enabled: boolean; HasPassword: boolean; Hint: string; BackupCount: number; PlainCount: number }>('backup', 'EncryptStatus', [])
+    return { enabled: !!r.Enabled, hasPassword: !!r.HasPassword, hint: r.Hint ?? '', backupCount: r.BackupCount || 0, plainCount: r.PlainCount || 0 }
+  },
+  /** 设置 / 修改备份密码（已开启时要带旧密码） */
+  setPassword: (oldPassword: string, newPassword: string, hint: string): Promise<void> =>
+    invoke('backup', 'SetPassword', [oldPassword, newPassword, hint, op()]),
+  /** 关闭加密（要当前密码）；已有加密备份不受影响 */
+  disableEncrypt: (password: string): Promise<void> => invoke('backup', 'DisableEncrypt', [password, op()]),
+  verifyPassword: (password: string): Promise<boolean> => invoke('backup', 'VerifyBackupPassword', [password]),
 
   /* --- 导出 / 导入（店主 11-05） --- */
 

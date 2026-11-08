@@ -57,7 +57,7 @@ try {
     # --- framework reference assemblies ---
     $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319'
     $baseRefs = New-Object 'System.Collections.Generic.List[Microsoft.CodeAnalysis.MetadataReference]'
-    foreach ($a in @('mscorlib.dll','System.dll','System.Core.dll','System.Data.dll','System.Xml.dll','Microsoft.CSharp.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Configuration.dll','System.Transactions.dll','System.IO.Compression.dll')) {
+    foreach ($a in @('mscorlib.dll','System.dll','System.Core.dll','System.Data.dll','System.Xml.dll','Microsoft.CSharp.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Configuration.dll','System.Transactions.dll','System.IO.Compression.dll','System.Security.dll')) {
         $p = Join-Path $fw $a
         if (-not (Test-Path $p)) { throw ('Framework assembly not found: ' + $p) }
         $baseRefs.Add([Microsoft.CodeAnalysis.MetadataReference]::CreateFromFile($p)) | Out-Null

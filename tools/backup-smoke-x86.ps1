@@ -136,7 +136,7 @@ try {
     $liveBefore = (Get-Item ([MemberManager.DAL.Db]::DbPath)).Length
     $snapBefore = @(Get-ChildItem $svcDir -Filter 'member-*-S.db' -ErrorAction SilentlyContinue).Count
     $refused = $false
-    try { [void]$svc.Restore('member-99999999-0000-Z.db', 'probe') } catch {
+    try { [void]$svc.Restore('member-99999999-0000-Z.db', 'probe', '') } catch {
         $e = $_.Exception
         if ($e -is [System.Management.Automation.MethodInvocationException] -and $e.InnerException) { $e = $e.InnerException }
         $refused = ($e.GetType().Name -eq 'BizException')
@@ -159,6 +159,132 @@ try {
     if (Test-Path $garbage) { Remove-Item $garbage -Force -ErrorAction SilentlyContinue }
     if (Test-Path $alien) { Remove-Item $alien -Force -ErrorAction SilentlyContinue }
     foreach ($ext in @('', '-wal', '-shm')) { if (Test-Path ($alien + $ext)) { Remove-Item ($alien + $ext) -Force -ErrorAction SilentlyContinue } }
+
+    # ==========================================================
+    #  C) Backup encryption (owner 11-08)
+    #     Covers: cipher round trip, wrong password, tamper, on-disk
+    #     format, BackupNow producing .dbk, restore by password,
+    #     disabling encryption, and the single-instance guard being
+    #     present in the shell assembly.
+    # ==========================================================
+    $pwdOk = 'Probe#Pwd2026'
+    $encFiles = New-Object 'System.Collections.Generic.List[string]'
+
+    # C1: encrypt/decrypt round trip preserves every byte
+    $srcTxt = Join-Path $env:TEMP ('mm_enc_' + [Guid]::NewGuid().ToString('N') + '.bin')
+    $encTxt = $srcTxt + '.dbk'
+    $decTxt = $srcTxt + '.out'
+    $bytes = New-Object 'byte[]' 4096
+    for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [byte](($i * 37) % 251) }
+    [System.IO.File]::WriteAllBytes($srcTxt, $bytes)
+    [MemberManager.BLL.BackupCrypto]::Encrypt($srcTxt, $encTxt, $pwdOk)
+    Chk 'C1a-encrypt-writes-file' (Test-Path $encTxt)
+    Chk 'C1b-encrypted-looks-encrypted' ([MemberManager.BLL.BackupCrypto]::IsEncryptedFile($encTxt))
+    Chk 'C1c-plain-is-not-encrypted' (-not [MemberManager.BLL.BackupCrypto]::IsEncryptedFile($srcTxt))
+    [MemberManager.BLL.BackupCrypto]::Decrypt($encTxt, $decTxt, $pwdOk)
+    $back = [System.IO.File]::ReadAllBytes($decTxt)
+    $same = ($back.Length -eq $bytes.Length)
+    if ($same) { for ($i = 0; $i -lt $bytes.Length; $i++) { if ($back[$i] -ne $bytes[$i]) { $same = $false; break } } }
+    Chk 'C1d-roundtrip-bytes-match' $same
+
+    # C2: wrong password must be refused with a BizException
+    $wrong = $false
+    try { [MemberManager.BLL.BackupCrypto]::Decrypt($encTxt, ($srcTxt + '.bad'), 'WrongPwd999') } catch {
+        $e = $_.Exception
+        if ($e -is [System.Management.Automation.MethodInvocationException] -and $e.InnerException) { $e = $e.InnerException }
+        $wrong = ($e.GetType().Name -eq 'BizException')
+        L ('  diag C2: wrong-pwd msg=' + $e.Message)
+    }
+    Chk 'C2-wrong-password-refused' $wrong
+    Chk 'C2b-no-half-output' (-not (Test-Path ($srcTxt + '.bad')))
+
+    # C3: flipping one ciphertext byte must be detected (HMAC)
+    $tampered = $srcTxt + '.tamper'
+    [System.IO.File]::Copy($encTxt, $tampered, $true)
+    $tb = [System.IO.File]::ReadAllBytes($tampered)
+    $tb[60] = [byte]($tb[60] -bxor 0xFF)
+    [System.IO.File]::WriteAllBytes($tampered, $tb)
+    $detected = $false
+    try { [MemberManager.BLL.BackupCrypto]::Decrypt($tampered, ($srcTxt + '.tamper.out'), $pwdOk) } catch { $detected = $true }
+    Chk 'C3-tamper-detected' $detected
+
+    # C4: password verifier round trip (no plaintext password stored)
+    $ver = [MemberManager.BLL.BackupCrypto]::MakeVerifier($pwdOk)
+    Chk 'C4a-verifier-accepts-correct' ([MemberManager.BLL.BackupCrypto]::CheckVerifier($pwdOk, $ver))
+    Chk 'C4b-verifier-rejects-wrong' (-not [MemberManager.BLL.BackupCrypto]::CheckVerifier('WrongPwd999', $ver))
+    Chk 'C4c-verifier-has-no-plaintext' (-not ($ver -like ('*' + $pwdOk + '*')))
+
+    # C5: turning encryption on makes the next backup a .dbk with no plaintext twin
+    $svc.SetPassword('', $pwdOk, 'smoke hint', 'probe')
+    $st5 = $svc.GetEncryptStatus()
+    Chk 'C5a-encrypt-status-on' ($st5.Enabled -eq $true -and $st5.HasPassword -eq $true)
+    $encName = $svc.BackupNow($true, 'probe')
+    $encPath = Join-Path $svcDir $encName
+    $encFiles.Add($encPath)
+    L ('  diag C5: made=' + $encName)
+    Chk 'C5b-backup-ends-with-dbk' ($encName.EndsWith('.dbk'))
+    Chk 'C5c-encrypted-file-on-disk' ([MemberManager.BLL.BackupCrypto]::IsEncryptedFile($encPath))
+    $plainTwin = [System.IO.Path]::ChangeExtension($encPath, '.db')
+    Chk 'C5d-no-plaintext-left-behind' (-not (Test-Path $plainTwin))
+
+    # C6: it shows up flagged as encrypted and restore needs the password
+    $flag = $false
+    foreach ($r in $svc.List()) { if ($r.FileName -eq $encName) { $flag = $r.Encrypted } }
+    Chk 'C6a-list-marks-encrypted' $flag
+    $refNoPwd = $false
+    try { [void]$svc.Restore($encName, 'probe', '') } catch { $refNoPwd = $true }
+    Chk 'C6b-restore-without-password-refused' $refNoPwd
+    $refWrong = $false
+    try { [void]$svc.Restore($encName, 'probe', 'WrongPwd999') } catch { $refWrong = $true }
+    Chk 'C6c-restore-wrong-password-refused' $refWrong
+    $snapName = $svc.Restore($encName, 'probe', $pwdOk)
+    $snapPath = Join-Path $svcDir $snapName
+    $encFiles.Add($snapPath)
+    Chk 'C6d-restore-with-correct-password-ok' ($snapName -like 'member-*-S.db*')
+    Chk 'C6e-snapshot-also-encrypted' ([MemberManager.BLL.BackupCrypto]::IsEncryptedFile($snapPath))
+
+    # C7: disable needs the password; afterwards backups are plain again
+    $offBad = $false
+    try { $svc.DisableEncrypt('WrongPwd999', 'probe') } catch { $offBad = $true }
+    Chk 'C7a-disable-rejects-wrong-password' $offBad
+    $svc.DisableEncrypt($pwdOk, 'probe')
+    Chk 'C7b-disable-turns-flag-off' ($svc.GetEncryptStatus().Enabled -eq $false)
+    $plainName = $svc.BackupNow($true, 'probe')
+    $plainPath = Join-Path $svcDir $plainName
+    $encFiles.Add($plainPath)
+    L ('  diag C7: made=' + $plainName)
+    Chk 'C7c-new-backup-is-plain' ($plainName.EndsWith('.db') -and -not [MemberManager.BLL.BackupCrypto]::IsEncryptedFile($plainPath))
+
+    # C8: single-instance guard survives compilation (real double launch is
+    #     verified manually -- launching a GUI inside the smoke would hang CI)
+    $siOk = $false
+    try {
+        $asShell = [System.Reflection.Assembly]::LoadFrom((Join-Path $dist 'MemberManager.exe'))
+        $siType = $asShell.GetType('MemberManager.Shell.SingleInstance')
+        $siOk = ($null -ne $siType) -and ($null -ne $siType.GetMethod('TryAcquire')) -and ($null -ne $siType.GetMethod('ActivateExisting'))
+    } catch {
+        L ('  diag C8: ' + $_.Exception.Message)
+    }
+    Chk 'C8-single-instance-guard-present' $siOk
+
+    # C9: weak passwords are refused at the source (open source => password is
+    #     the only real secret, so all-digit / too-short must not be accepted)
+    $weakDigits = $false
+    try { [void][MemberManager.BLL.BackupCrypto]::MakeVerifier('88888888') } catch { $weakDigits = $true }
+    Chk 'C9a-all-digit-password-rejected' $weakDigits
+    $weakShort = $false
+    try { [void][MemberManager.BLL.BackupCrypto]::MakeVerifier('Ab1#') } catch { $weakShort = $true }
+    Chk 'C9b-short-password-rejected' $weakShort
+    $weakCommon = $false
+    try { [void][MemberManager.BLL.BackupCrypto]::MakeVerifier('password') } catch { $weakCommon = $true }
+    Chk 'C9c-common-password-rejected' $weakCommon
+
+    foreach ($f in $encFiles) {
+        if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+    }
+    foreach ($f in @($srcTxt, $encTxt, $decTxt, $tampered, ($srcTxt + '.bad'), ($srcTxt + '.tamper.out'))) {
+        if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+    }
 
     L ''
     if ($fail -eq 0) { L 'BACKUP SMOKE OK' } else { L ('BACKUP SMOKE FAILED: ' + $fail) }

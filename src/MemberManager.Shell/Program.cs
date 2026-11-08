@@ -21,12 +21,10 @@ namespace MemberManager.Shell
         {
             try { SetProcessDpiAwarenessContext(new System.IntPtr(-4)); } catch { }
 
-            // 店长点「重启软件」后，新进程带 --restarted 起来：先等旧进程真正退出，
-            // 否则两个进程同时打开同一个数据库，WAL 下会互相抢写锁（表现为启动卡住或 database is locked）。
-            if (args.Length >= 1 && args[0] == "--restarted")
-            {
-                System.Threading.Thread.Sleep(1500);
-            }
+            // 店长点「重启软件」后，新进程带 --restarted 起来：等旧进程真正放开单实例锁再继续
+            // （下面的 TryAcquire 会带 10 秒等待），否则两边同时打开同一个库会抢写锁。
+            bool restarted = args.Length >= 1 && args[0] == "--restarted";
+            bool probeMode = args.Length >= 2 && args[0] == "--probe";
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -43,6 +41,28 @@ namespace MemberManager.Shell
                 Logger.Info("命令行" + (on ? "启用" : "关闭") + "开机自启：" + (changed ? "成功" : "失败"));
                 Environment.ExitCode = changed ? 0 : 1;
                 return;
+            }
+
+            // ---- 单实例守卫（店主 11-08：双开会让同一笔单被结两次，账就重了）----
+            // 探针模式必须豁免：冒烟的用法本来就是「软件开着也拍一张图」，拦了就跑不动。
+            // 开机自启开关在上面已经提前 return，不会走到这里。
+            if (!probeMode)
+            {
+                if (!SingleInstance.TryAcquire(restarted ? 10000 : 0))
+                {
+                    bool activated = SingleInstance.ActivateExisting();
+                    Logger.Info("已有实例在运行，本次启动退出（" + (activated ? "已切换到已有窗口" : "未找到可激活的窗口") + "）");
+                    if (!activated)
+                    {
+                        MessageBox.Show(
+                            "会员管家已经在运行了，请不要重复打开。\n\n" +
+                            "如果找不到它的窗口，请先在任务栏或屏幕右下角找一找；" +
+                            "确认没有窗口，再打开「任务管理器」结束 MemberManager 进程后重新启动。",
+                            "已经开着了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    return;
+                }
+                Logger.Info("单实例锁已取得（数据目录：" + AppPaths.RootDir + "）");
             }
 
             // ---- 启动自检：数据库初始化 ----

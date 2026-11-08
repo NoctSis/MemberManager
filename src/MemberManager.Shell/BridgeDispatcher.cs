@@ -107,6 +107,10 @@ namespace MemberManager.Shell
             { "backup.ExportVersions", "数据备份" },
             { "backup.Import", "数据备份" },
             { "backup.Rotate", "数据备份" },
+            // 店主 11-08：备份密码能决定「谁能解开全店客户资料」，比普通备份动作更敏感，
+            // 归「系统设置」（收银员默认没有），避免收银员自行改密码把店主锁在外面。
+            { "backup.SetPassword", "系统设置" },
+            { "backup.DisableEncrypt", "系统设置" },
             // 系统设置（系统参数 / 店名店号 / 积分规则与兑换 / 等级制度）
             { "settings.Save", "系统设置" },
             // 店主 11-05：日志清理是删数据（只删操作日志，不碰业务流水），归系统设置

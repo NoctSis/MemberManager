@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { PageFill } from '@/components/common/PageLayout'
 import {
   DatabaseBackup, History, AlertTriangle, HardDriveDownload, CheckCircle2, Loader2,
-  Settings2, Trash2, FileDown, FileUp, XCircle, RotateCcw,
+  Settings2, Trash2, FileDown, FileUp, XCircle, RotateCcw, Lock, Unlock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -44,6 +44,19 @@ export function BackupPage() {
   const [backupDir, setBackupDir] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<BackupVersion | null>(null)
 
+  // 备份加密（店主 11-08）：备份里有全部会员手机号和余额，落地即密文
+  const [enc, setEnc] = useState<{ enabled: boolean; hasPassword: boolean; hint: string; backupCount: number; plainCount: number }>(
+    { enabled: false, hasPassword: false, hint: '', backupCount: 0, plainCount: 0 },
+  )
+  const [encOpen, setEncOpen] = useState(false)
+  const [encOld, setEncOld] = useState('')
+  const [encNew, setEncNew] = useState('')
+  const [encNew2, setEncNew2] = useState('')
+  const [encHint, setEncHint] = useState('')
+  const [encBusy, setEncBusy] = useState(false)
+  // 恢复加密备份时要输入的密码
+  const [restorePwd, setRestorePwd] = useState('')
+
   // 导出数据（店主 11-05）：按表勾选，默认勾业务数据 + 系统底座
   const [exportOpen, setExportOpen] = useState(false)
   const [tables, setTables] = useState<BackupTable[]>([])
@@ -76,6 +89,7 @@ export function BackupPage() {
       .getAuto()
       .then((a) => { setAutoOn(a.enabled); setAutoHour(String(a.hour)); setAutoLast(a.lastDate || '') })
       .catch(() => {})
+    apiBackup.encryptStatus().then(setEnc).catch(() => {})
   }
   useEffect(load, [])
   // 进页面触发一次每日自动备份检查：到点且当天还没备份才会真的执行
@@ -166,14 +180,49 @@ export function BackupPage() {
     if (!restoreTarget || !canRestore) return
     const found = versions.find((v) => v.id === restoreTarget.id)
     if (!found) return
+    if (found.encrypted && !restorePwd) { toast.error('这个备份是加密的，请输入备份密码'); return }
     apiBackup
-      .restore(found.fileName)
+      .restore(found.fileName, found.encrypted ? restorePwd : '')
       .then(() => {
         toast.success(`已恢复到备份「${restoreTarget.time}」：恢复前数据已自动另存快照，请重启软件`)
         setRestoreTarget(null)
         setRestoreConfirmText('')
+        setRestorePwd('')
         load()
       })
+      .catch((e) => toast.error(String(e)))
+  }
+
+  /* ---------------- 备份加密 ---------------- */
+
+  const openEncDialog = () => {
+    setEncOld('')
+    setEncNew('')
+    setEncNew2('')
+    setEncHint(enc.hint || '')
+    setEncOpen(true)
+  }
+
+  const saveEnc = () => {
+    if (encNew.length < 8) { toast.error('备份密码至少 8 位，且不能全是数字'); return }
+    if (encNew !== encNew2) { toast.error('两次输入的新密码不一致'); return }
+    setEncBusy(true)
+    apiBackup
+      .setPassword(enc.enabled && enc.hasPassword ? encOld : '', encNew, encHint)
+      .then(() => {
+        setEncBusy(false)
+        setEncOpen(false)
+        toast.success('备份密码已设置，之后的备份都会加密保存')
+        load()
+      })
+      .catch((e) => { setEncBusy(false); toast.error(String(e)) })
+  }
+
+  const disableEnc = () => {
+    if (!encOld) { toast.error('请先在上面填写当前备份密码，再点「关闭加密」'); return }
+    apiBackup
+      .disableEncrypt(encOld)
+      .then(() => { setEncOpen(false); toast.success('已关闭加密，之后的新备份为明文文件'); load() })
       .catch((e) => toast.error(String(e)))
   }
 
@@ -371,6 +420,29 @@ export function BackupPage() {
       </SectionCard>
 
       <SectionCard
+        className="shrink-0"
+        title={<span className="flex items-center gap-1.5"><Lock size={14} className="text-primary" /> 备份加密</span>}
+        extra={<Badge tone="primary">{enc.enabled ? '已开启' : '未开启'}</Badge>}
+        bodyClassName="px-4 py-3"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant={enc.enabled ? 'secondary' : 'primary'} size="sm" onClick={openEncDialog}>
+            {enc.enabled ? <Unlock size={12} /> : <Lock size={12} />}
+            {enc.enabled ? '修改密码' : '设置备份密码'}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            加密备份 <span className="tabular-nums text-foreground">{enc.backupCount}</span> 份
+            {enc.plainCount > 0 ? <span className="ml-1">（另有历史明文备份 {enc.plainCount} 份）</span> : null}
+          </span>
+          {enc.hint ? <span className="text-xs text-muted-foreground">密码提示：{enc.hint}</span> : null}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-2">
+          开启后备份落地即为密文（AES-256），拷到 U 盘、发微信都打不开，恢复时需要输入密码。
+          <span className="text-destructive">密码请自己记牢：忘记密码没有任何后门，那些备份就再也解不开了。</span>
+        </p>
+      </SectionCard>
+
+      <SectionCard
         className="page-body flex flex-col"
         title={<span className="flex items-center gap-1.5"><History size={14} className="text-primary" /> 备份版本列表</span>}
         extra={
@@ -417,6 +489,7 @@ export function BackupPage() {
             v.time,
             <span key="t" className="inline-flex items-center gap-1.5">
               <Badge tone={v.type === '手动' ? 'solid' : 'primary'}>{v.type}</Badge>
+              {v.encrypted ? <span className="inline-flex items-center gap-0.5 text-[10px] text-primary"><Lock size={9} />加密</span> : null}
               {i === 0 ? <span className="text-[10px] text-primary">最新</span> : null}
             </span>,
             v.size,
@@ -425,7 +498,7 @@ export function BackupPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => { setRestoreTarget(v); setRestoreConfirmText('') }}
+                onClick={() => { setRestoreTarget(v); setRestoreConfirmText(''); setRestorePwd('') }}
               >
                 <HardDriveDownload size={12} /> 恢复到此版本
               </Button>
@@ -450,7 +523,11 @@ export function BackupPage() {
           footer={
             <>
               <Button variant="secondary" onClick={() => setRestoreTarget(null)}>取消</Button>
-              <Button variant="danger" onClick={doRestore} disabled={!canRestore}>
+              <Button
+                variant="danger"
+                onClick={doRestore}
+                disabled={!canRestore || (!!restoreTarget.encrypted && !restorePwd)}
+              >
                 <HardDriveDownload size={13} /> 确认恢复
               </Button>
             </>
@@ -483,6 +560,129 @@ export function BackupPage() {
                 <span className="block text-xs text-destructive mt-1.5" role="alert">输入内容不正确，请准确输入「恢复」</span>
               ) : null}
             </label>
+            {restoreTarget.encrypted ? (
+              <label className="block">
+                <span className="block text-sm font-medium mb-1.5">
+                  这个备份已加密，请输入备份密码 <span className="text-destructive">*</span>
+                </span>
+                <input
+                  type="password"
+                  value={restorePwd}
+                  onChange={(e) => setRestorePwd(e.target.value)}
+                  placeholder="备份密码"
+                  aria-label="备份密码"
+                  className={cx(
+                    'h-9 w-full px-3 text-sm bg-card rounded-[var(--radius-sm)] border border-input',
+                    'focus:outline-none focus:border-primary focus:shadow-[var(--focus-ring)] transition-shadow',
+                  )}
+                />
+                {enc.hint ? <span className="block text-xs text-muted-foreground mt-1.5">提示：{enc.hint}</span> : null}
+                <span className="block text-[11px] text-muted-foreground mt-1.5">
+                  如果这是改密码之前做的备份，请用当时的旧密码。
+                </span>
+              </label>
+            ) : null}
+          </div>
+        </Modal>
+      ) : null}
+
+      {encOpen ? (
+        <Modal
+          title={enc.enabled ? '修改备份密码' : '设置备份密码'}
+          onClose={() => { if (!encBusy) setEncOpen(false) }}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setEncOpen(false)} disabled={encBusy}>取消</Button>
+              {enc.enabled ? (
+                <Button
+                  variant="ghost"
+                  onClick={disableEnc}
+                  disabled={encBusy}
+                  className="text-destructive hover:text-destructive"
+                  title="关闭后新备份为明文；已有加密备份仍然能恢复"
+                >
+                  关闭加密
+                </Button>
+              ) : null}
+              <Button variant="primary" onClick={saveEnc} disabled={encBusy}>
+                {encBusy ? <Loader2 size={13} className="animate-spin" /> : <Lock size={13} />} 保存
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <div className="rounded-[var(--radius-sm)] border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-xs space-y-1" role="alert">
+              <p className="font-semibold text-destructive flex items-center gap-1.5">
+                <AlertTriangle size={13} /> 忘记密码 = 这些备份永久打不开
+              </p>
+              <p>系统不保存密码原文、也没有万能钥匙。请把密码记在只有你知道的地方。</p>
+              <p>自动备份会用本机保存的密码加密；换电脑或重装系统后恢复，需要你亲手输入这个密码。</p>
+            </div>
+
+            {enc.enabled && enc.hasPassword ? (
+              <label className="block">
+                <span className="block text-sm font-medium mb-1.5">当前密码 <span className="text-destructive">*</span></span>
+                <input
+                  type="password"
+                  value={encOld}
+                  onChange={(e) => setEncOld(e.target.value)}
+                  placeholder="当前备份密码"
+                  aria-label="当前备份密码"
+                  className="h-9 w-full px-3 text-sm bg-card rounded-[var(--radius-sm)] border border-input focus:outline-none focus:border-primary focus:shadow-[var(--focus-ring)] transition-shadow"
+                />
+              </label>
+            ) : null}
+
+            <label className="block">
+              <span className="block text-sm font-medium mb-1.5">新密码（至少 8 位，别用纯数字） <span className="text-destructive">*</span></span>
+              <input
+                type="password"
+                value={encNew}
+                onChange={(e) => setEncNew(e.target.value)}
+                placeholder="新备份密码"
+                aria-label="新备份密码"
+                className="h-9 w-full px-3 text-sm bg-card rounded-[var(--radius-sm)] border border-input focus:outline-none focus:border-primary focus:shadow-[var(--focus-ring)] transition-shadow"
+              />
+            </label>
+
+            <label className="block">
+              <span className="block text-sm font-medium mb-1.5">再输一次 <span className="text-destructive">*</span></span>
+              <input
+                type="password"
+                value={encNew2}
+                onChange={(e) => setEncNew2(e.target.value)}
+                placeholder="重复新密码"
+                aria-label="确认新备份密码"
+                className={cx(
+                  'h-9 w-full px-3 text-sm bg-card rounded-[var(--radius-sm)] border',
+                  'focus:outline-none focus:border-primary focus:shadow-[var(--focus-ring)] transition-shadow',
+                  encNew2 && encNew2 !== encNew ? 'border-destructive' : 'border-input',
+                )}
+              />
+              {encNew2 && encNew2 !== encNew ? (
+                <span className="block text-xs text-destructive mt-1.5" role="alert">两次输入不一致</span>
+              ) : null}
+            </label>
+
+            <label className="block">
+              <span className="block text-sm font-medium mb-1.5">密码提示（可不填）</span>
+              <input
+                value={encHint}
+                onChange={(e) => setEncHint(e.target.value)}
+                placeholder="例如：店里开业那年的年份 + 6 位"
+                aria-label="密码提示"
+                className="h-9 w-full px-3 text-sm bg-card rounded-[var(--radius-sm)] border border-input focus:outline-none focus:border-primary focus:shadow-[var(--focus-ring)] transition-shadow"
+              />
+              <span className="block text-[11px] text-muted-foreground mt-1.5">
+                提示是明文，会显示在恢复窗口里，别写密码本身。
+              </span>
+            </label>
+
+            {enc.enabled ? (
+              <p className="text-[11px] text-muted-foreground">
+                改密码不会重新加密已有备份：之前那些 .dbk 仍然只能用旧密码恢复。
+              </p>
+            ) : null}
           </div>
         </Modal>
       ) : null}

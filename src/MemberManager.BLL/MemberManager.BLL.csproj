@@ -39,6 +39,8 @@
     </Reference>
     <!-- Excel 导出（ExcelWriter 用 ZipArchive 手写 .xlsx，走框架自带的 System.IO.Compression，零第三方依赖） -->
     <Reference Include="System.IO.Compression" />
+    <!-- 备份加密：密码用 DPAPI(ProtectedData) 保存在本机，需要 System.Security -->
+    <Reference Include="System.Security" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs" />

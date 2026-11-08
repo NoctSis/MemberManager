@@ -18,6 +18,8 @@ namespace MemberManager.BLL
             public string Size;
             public string Note;
             public string FileName;
+            /// <summary>true = 这个备份是加密的（.dbk），恢复时必须输入密码。</summary>
+            public bool Encrypted;
         }
 
         /// <summary>
@@ -34,7 +36,15 @@ namespace MemberManager.BLL
         {
             var list = new List<BackupRow>();
             Directory.CreateDirectory(BackupDir);
-            var files = new List<string>(Directory.GetFiles(BackupDir, "member-*.db"));
+            // 明文 .db 与加密 .dbk 并存：店主 11-08 打开加密后，历史明文备份仍然要能看到、能恢复，
+            // 不能被新格式挤掉（那是他过去几个月的救命稻草）。
+            var files = new List<string>();
+            foreach (string f in Directory.GetFiles(BackupDir, "member-*"))
+            {
+                if (f.EndsWith(".db", StringComparison.OrdinalIgnoreCase) ||
+                    f.EndsWith(BackupCrypto.EncryptedExt, StringComparison.OrdinalIgnoreCase))
+                    files.Add(f);
+            }
             files.Sort(StringComparer.OrdinalIgnoreCase);
             files.Reverse();
             int id = 1;
@@ -42,6 +52,7 @@ namespace MemberManager.BLL
             {
                 var fi = new FileInfo(f);
                 string name = Path.GetFileNameWithoutExtension(f);
+                bool enc = f.EndsWith(BackupCrypto.EncryptedExt, StringComparison.OrdinalIgnoreCase);
                 string type = "自动";
                 if (name.Contains("-M")) type = "手动";
                 if (name.Contains("-S")) type = "恢复前快照";
@@ -59,7 +70,8 @@ namespace MemberManager.BLL
                     Type = type,
                     Size = (fi.Length / 1024.0 / 1024.0).ToString("0.0") + " MB",
                     Note = type == "自动" ? "每日自动备份" : (type == "手动" ? "店长手动备份" : "恢复前自动快照"),
-                    FileName = Path.GetFileName(f)
+                    FileName = Path.GetFileName(f),
+                    Encrypted = enc
                 });
                 if (list.Count >= 30) break;
             }
@@ -593,9 +605,10 @@ namespace MemberManager.BLL
 
                 string dst = Path.Combine(targetDir, name);
                 int n = 2;
+                string ext = Path.GetExtension(name);          // .db 或 .dbk，导出去也要保持原样
                 while (File.Exists(dst))
                 {
-                    dst = Path.Combine(targetDir, Path.GetFileNameWithoutExtension(name) + "_" + n + ".db");
+                    dst = Path.Combine(targetDir, Path.GetFileNameWithoutExtension(name) + "_" + n + ext);
                     n++;
                 }
                 File.Copy(src, dst, false);
@@ -620,7 +633,13 @@ namespace MemberManager.BLL
         {
             Directory.CreateDirectory(BackupDir);
             var files = new List<FileInfo>();
-            foreach (string f in Directory.GetFiles(BackupDir, "member-*.db")) files.Add(new FileInfo(f));
+            foreach (string f in Directory.GetFiles(BackupDir, "member-*"))
+            {
+                // 明文 .db 与加密 .dbk 一起参与轮转，否则开了加密以后旧的明文备份会永远堆着不清理
+                if (f.EndsWith(".db", StringComparison.OrdinalIgnoreCase) ||
+                    f.EndsWith(BackupCrypto.EncryptedExt, StringComparison.OrdinalIgnoreCase))
+                    files.Add(new FileInfo(f));
+            }
             files.Sort((a, b) => b.LastWriteTime.CompareTo(a.LastWriteTime));   // 新的排前面
 
             var auto = new List<FileInfo>();
@@ -741,12 +760,51 @@ namespace MemberManager.BLL
             // 备份必须是**单个自包含文件**：源库是 WAL 模式，打开备份时会带出 -wal/-shm 伴生文件。
             // 先 checkpoint 把 WAL 里的内容落进主库，再删掉两个伴生文件 —— 以后拷走这一个 .db 就是完整备份。
             SealBackupFile(target);
+
+            // ---- 加密落盘（店主 11-08）----
+            // 顺序刻意如此：先在**明文**上做体检（HealthCheck 只能读明文 SQLite），
+            // 再加密，再把密文解回来做第二次体检。加完密自己都打不开的备份等于没有备份，
+            // 所以这一步失败必须整体作废并把明文件删掉，绝不留下「看起来成功」的坏产物。
+            string finalPath = target;
+            if (EncryptOn())
+            {
+                string pwd = StoredPassword();
+                if (string.IsNullOrEmpty(pwd))
+                {
+                    Logger.Warn("已开启备份加密但取不到本机保存的密码，本次按明文保存");
+                }
+                else
+                {
+                    string enc = Path.ChangeExtension(target, BackupCrypto.EncryptedExt);
+                    string verify = Path.Combine(BackupDir, "_enc-verify.tmp.db");
+                    try
+                    {
+                        BackupCrypto.Encrypt(target, enc, pwd);
+                        BackupCrypto.Decrypt(enc, verify, pwd);
+                        string badEnc = HealthCheck(verify);
+                        if (badEnc != null) throw new BizException("加密备份解开后体检未通过：" + badEnc);
+                        TryDelete(verify);
+                        TryDelete(target);          // 明文不留在盘上，否则加密毫无意义
+                        finalPath = enc;
+                    }
+                    catch (Exception ex)
+                    {
+                        TryDelete(verify);
+                        TryDelete(enc);
+                        TryDelete(target);
+                        Logger.Warn("备份加密失败，本次备份已作废：" + ex.Message);
+                        throw new BizException("备份加密失败，本次备份已作废：" + ex.Message);
+                    }
+                }
+            }
+
             using (var conn = Db.OpenConnection())
-                W.Log(conn, null, "数据备份", manual ? "手动备份" : "自动备份", Path.GetFileName(target) + "（体检通过）");
+                W.Log(conn, null, "数据备份", manual ? "手动备份" : "自动备份",
+                    Path.GetFileName(finalPath) + "（体检通过" + (finalPath == target ? "" : "，已加密") + "）");
             // 备份成功后顺手轮转：备份可以留，但不能无限堆（失败不影响本次备份结果）
             try { Rotate(operatorName); }
             catch (Exception ex) { Logger.Warn("备份轮转失败（不影响本次备份）：" + ex.Message); }
-            return Path.GetFileName(target);
+            return Path.GetFileName(finalPath);
         }
 
         private static SQLiteConnection SQLiteOpenHelperBackup(string path)
@@ -756,34 +814,188 @@ namespace MemberManager.BLL
             return conn;
         }
 
-        public string Restore(string fileName, string operatorName)
+        /// <summary>
+        /// 恢复备份。加密备份（.dbk）必须给对密码；历史明文备份传空串即可。
+        /// 恢复前一律给当前库拍一张快照，出事能退回去；快照也按当前加密设置落盘，
+        /// 不能出现「备份都加密了、快照却是明文」的漏口。
+        ///
+        /// 刻意只留这一个 3 参版本，不做 2 参重载：桥是「按方法名取第一个」再比对参数个数，
+        /// 一重载就会命中错的那一个（表现为「参数个数不匹配」）。
+        /// </summary>
+        public string Restore(string fileName, string operatorName, string password)
         {
             if (string.IsNullOrEmpty(fileName) || !fileName.StartsWith("member-") || fileName.Contains(".."))
                 throw new BizException("非法的备份文件名");
             string src = Path.Combine(BackupDir, fileName);
             if (!File.Exists(src)) throw new BizException("备份文件不存在");
-            // 恢复前体检：损坏的备份一律拒绝，当前库一个字节都不动
-            string bad = HealthCheck(src);
-            if (bad != null)
+
+            bool enc = BackupCrypto.IsEncryptedFile(src);
+            string plain = src;
+            string tmpPlain = null;
+            try
             {
-                Logger.Warn("拒绝恢复损坏的备份 " + fileName + "：" + bad);
-                throw new BizException("这个备份已损坏，不能恢复：" + bad + "。请换一个日期更早的备份。");
+                if (enc)
+                {
+                    // 解到备份目录的临时文件，恢复完成后在 finally 里删掉 —— 明文一个字节都不留在盘上。
+                    tmpPlain = Path.Combine(BackupDir, "_restore.tmp.db");
+                    BackupCrypto.Decrypt(src, tmpPlain, password);
+                    plain = tmpPlain;
+                }
+
+                // 恢复前体检：损坏的备份一律拒绝，当前库一个字节都不动
+                string bad = HealthCheck(plain);
+                if (bad != null)
+                {
+                    Logger.Warn("拒绝恢复损坏的备份 " + fileName + "：" + bad);
+                    throw new BizException("这个备份已损坏，不能恢复：" + bad + "。请换一个日期更早的备份。");
+                }
+
+                // 恢复前快照
+                string snap = Path.Combine(BackupDir, "member-" + DateTime.Now.ToString("yyyy-MM-dd HH:mm").Replace("-", "").Replace(":", "").Replace(" ", "-") + "-S.db");
+                using (var c1 = Db.OpenConnection())
+                using (var c2 = SQLiteOpenHelperBackup(snap))
+                {
+                    c1.BackupDatabase(c2, "main", "main", -1, null, 0);
+                }
+                SQLiteConnection.ClearAllPools();
+                // 旧 -wal/-shm 不清，会被当成新库的追加内容，恢复出来的数据可能夹带旧页
+                TryDelete(Db.DbPath + "-wal");
+                TryDelete(Db.DbPath + "-shm");
+                File.Copy(plain, Db.DbPath, true);
+
+                string snapFinal = SealSnapshot(snap, enc ? password : null);
+                using (var conn = Db.OpenConnection())
+                    W.Log(conn, null, "数据备份", "恢复备份",
+                        "恢复自 " + fileName + "，恢复前快照 " + Path.GetFileName(snapFinal));
+                return Path.GetFileName(snapFinal);
             }
-            // 恢复前快照
-            string snap = Path.Combine(BackupDir, "member-" + DateTime.Now.ToString("yyyy-MM-dd HH:mm").Replace("-", "").Replace(":", "").Replace(" ", "-") + "-S.db");
-            using (var c1 = Db.OpenConnection())
-            using (var c2 = SQLiteOpenHelperBackup(snap))
+            finally
             {
-                c1.BackupDatabase(c2, "main", "main", -1, null, 0);
+                if (tmpPlain != null) TryDelete(tmpPlain);
             }
-            SQLiteConnection.ClearAllPools();
-            // 旧 -wal/-shm 不清，会被当成新库的追加内容，恢复出来的数据可能夹带旧页
-            TryDelete(Db.DbPath + "-wal");
-            TryDelete(Db.DbPath + "-shm");
-            File.Copy(src, Db.DbPath, true);
+        }
+
+        /// <summary>
+        /// 把恢复前快照封口；当前开着加密且拿得到密码时顺手加密，否则保持明文（并记日志）。
+        /// </summary>
+        private string SealSnapshot(string snapPlain, string password)
+        {
+            SealBackupFile(snapPlain);
+            if (!EncryptOn()) return snapPlain;
+            string pwd = string.IsNullOrEmpty(password) ? StoredPassword() : password;
+            if (string.IsNullOrEmpty(pwd))
+            {
+                Logger.Warn("恢复前快照未能加密（没有可用密码），本次快照为明文");
+                return snapPlain;
+            }
+            try
+            {
+                string enc = Path.ChangeExtension(snapPlain, BackupCrypto.EncryptedExt);
+                BackupCrypto.Encrypt(snapPlain, enc, pwd);
+                TryDelete(snapPlain);
+                return enc;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("恢复前快照加密失败，保留明文快照：" + ex.Message);
+                return snapPlain;
+            }
+        }
+
+        // ==================== 备份加密设置（店主 11-08） ====================
+        // 存三样东西，都不含密码本身的可读形式：
+        //   backup_encrypt        "1"/"0"
+        //   backup_pwd_verifier   盐:PBKDF2 哈希，只用来判断「输得对不对」
+        //   backup_pwd_sealed     DPAPI 加密后的密码（仅当前 Windows 用户可解），供**自动备份**无人值守使用
+        // 自动备份是半夜跑的，没人能输密码；所以密码必须能被程序自己取回来。
+        // DPAPI 只保护「本机上这份副本」，备份文件本身仍然只有密码能解 —— 泄露到别的机器上依然是密文。
+
+        public class EncryptStatus
+        {
+            public bool Enabled;
+            public bool HasPassword;
+            public string Hint;
+            public int BackupCount;        // 加密备份个数
+            public int PlainCount;         // 明文备份个数（历史遗留）
+        }
+
+        public EncryptStatus GetEncryptStatus()
+        {
+            var s = new EncryptStatus
+            {
+                Enabled = EncryptOn(),
+                HasPassword = !string.IsNullOrEmpty(DatabaseInitializer.GetSetting("backup_pwd_verifier", "")),
+                Hint = DatabaseInitializer.GetSetting("backup_pwd_hint", "")
+            };
+            try
+            {
+                Directory.CreateDirectory(BackupDir);
+                foreach (string f in Directory.GetFiles(BackupDir, "member-*"))
+                {
+                    if (f.EndsWith(BackupCrypto.EncryptedExt, StringComparison.OrdinalIgnoreCase)) s.BackupCount++;
+                    else if (f.EndsWith(".db", StringComparison.OrdinalIgnoreCase)) s.PlainCount++;
+                }
+            }
+            catch { }
+            return s;
+        }
+
+        /// <summary>
+        /// 设置 / 修改备份密码并开启加密。已开启时必须给对旧密码（防止别人随手改掉）。
+        /// **不会重新加密历史备份**：改密码后，之前的 .dbk 仍然只能用旧密码恢复，界面上必须说清。
+        /// </summary>
+        public void SetPassword(string oldPassword, string newPassword, string hint, string operatorName)
+        {
+            if (string.IsNullOrEmpty(newPassword) || newPassword.Length < BackupCrypto.MinPasswordLength)
+                throw new BizException("备份密码至少 " + BackupCrypto.MinPasswordLength + " 位");
+
+            bool on = EncryptOn();
+            string verifier = DatabaseInitializer.GetSetting("backup_pwd_verifier", "");
+            if (on && !string.IsNullOrEmpty(verifier) && !BackupCrypto.CheckVerifier(oldPassword, verifier))
+                throw new BizException("原备份密码不对，无法修改");
+
+            DatabaseInitializer.SetSetting("backup_pwd_verifier", BackupCrypto.MakeVerifier(newPassword));
+            DatabaseInitializer.SetSetting("backup_pwd_sealed", BackupCrypto.SealSecret(newPassword));
+            DatabaseInitializer.SetSetting("backup_pwd_hint", hint ?? "");
+            DatabaseInitializer.SetSetting("backup_encrypt", "1");
+
             using (var conn = Db.OpenConnection())
-                W.Log(conn, null, "数据备份", "恢复备份", "恢复自 " + fileName + "，恢复前快照 " + Path.GetFileName(snap));
-            return Path.GetFileName(snap);
+                W.Log(conn, null, "数据备份", "开启备份加密",
+                    "备份密码已" + (string.IsNullOrEmpty(verifier) ? "设置" : "修改") + "；此前生成的备份仍需旧密码恢复");
+        }
+
+        /// <summary>关闭加密（需要当前密码）。关闭后新备份是明文 .db，已有 .dbk 不受影响、照样能恢复。</summary>
+        public void DisableEncrypt(string password, string operatorName)
+        {
+            string verifier = DatabaseInitializer.GetSetting("backup_pwd_verifier", "");
+            if (!string.IsNullOrEmpty(verifier) && !BackupCrypto.CheckVerifier(password, verifier))
+                throw new BizException("备份密码不对，无法关闭加密");
+
+            DatabaseInitializer.SetSetting("backup_encrypt", "0");
+            using (var conn = Db.OpenConnection())
+                W.Log(conn, null, "数据备份", "关闭备份加密", "之后的新备份为明文文件；已有加密备份不受影响");
+        }
+
+        /// <summary>用当前密码验证一下（界面「忘记密码？」时给店主自己确认用）。</summary>
+        public bool VerifyBackupPassword(string password)
+        {
+            return BackupCrypto.CheckVerifier(password, DatabaseInitializer.GetSetting("backup_pwd_verifier", ""));
+        }
+
+        private static bool EncryptOn()
+        {
+            return DatabaseInitializer.GetSetting("backup_encrypt", "0") == "1";
+        }
+
+        /// <summary>取回本机保存的备份密码（DPAPI，仅当前 Windows 用户可解）。取不到返回 null。</summary>
+        private static string StoredPassword()
+        {
+            try { return BackupCrypto.UnsealSecret(DatabaseInitializer.GetSetting("backup_pwd_sealed", "")); }
+            catch (Exception ex)
+            {
+                Logger.Warn("取回备份密码失败（可能换了 Windows 用户或重装过系统）：" + ex.Message);
+                return null;
+            }
         }
 
         /// <summary>D4：删除一个备份版本（只删备份文件，绝不动当前数据库）。</summary>

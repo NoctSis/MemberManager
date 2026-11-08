@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Data.SQLite;
 using MemberManager.Common;
@@ -75,15 +76,18 @@ namespace MemberManager.BLL
             try
             {
                 if (!Directory.Exists(Db.BackupDir)) return UiText.StatusBackupNone;
-                var files = Directory.GetFiles(Db.BackupDir, "*.db");
-                if (files.Length == 0) return UiText.StatusBackupNone;
+                // 加密备份（.dbk）也要算进来，否则开了加密以后首页永远显示「暂无备份」
+                var files = new List<string>();
+                files.AddRange(Directory.GetFiles(Db.BackupDir, "member-*.db"));
+                files.AddRange(Directory.GetFiles(Db.BackupDir, "member-*" + BackupCrypto.EncryptedExt));
+                if (files.Count == 0) return UiText.StatusBackupNone;
                 DateTime latest = DateTime.MinValue;
                 foreach (var f in files)
                 {
                     DateTime t = File.GetLastWriteTime(f);
                     if (t > latest) latest = t;
                 }
-                return UiText.StatusBackupPrefix + latest.ToString("MM-dd HH:mm") + "，共 " + files.Length + " 版";
+                return UiText.StatusBackupPrefix + latest.ToString("MM-dd HH:mm") + "，共 " + files.Count + " 版";
             }
             catch
             {
