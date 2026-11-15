@@ -17,7 +17,7 @@
 
 #define MyAppName      "会员管家"
 #define MyAppExeName   "MemberManager.exe"
-#define MyAppVersion   "1.0.3"
+#define MyAppVersion   "1.0.4"
 #define MyAppPublisher "会员管家"
 
 ; Stable AppId: keeps upgrade / uninstall / start-menu entry tied together.
@@ -32,7 +32,7 @@
 #ifdef LIGHT
   #define OutBase "收银系统-安装程序-轻量版"
 #else
-  #define OutBase "会员管家-安装程序-1.0.3"
+  #define OutBase "会员管家-安装程序-1.0.4"
 #endif
 
 ; ---- paths: all relative to this script (tools\_inno\), so a fresh clone on
@@ -101,6 +101,12 @@ UninstallFilesDir={app}
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
+
+[Messages]
+; The stock wording ("please close the running program") leaves the owner stuck:
+; the app keeps running with no visible window (tray / auto-start), so "close it"
+; sounds impossible and he reboots the whole PC. Say where to look.
+SetupAppRunningError=安装程序检测到 %1 正在运行。%n%n请在屏幕右下角任务栏找到它的图标，右键退出；%n或按 Ctrl+Alt+Del 打开任务管理器，结束 MemberManager 进程。%n%n然后点「确定」继续安装，或点「取消」退出。
 
 [Tasks]
 Name: "desktopicon"; Description: "在桌面上创建快捷方式"; GroupDescription: "附加图标:"; Flags: checkedonce
@@ -220,6 +226,57 @@ begin
   Result := True;
 end;
 
+// Kill the app by image name. Used by the installer (before overwriting files)
+// and by the uninstaller. /F because a background instance with no window would
+// otherwise ignore the polite request.
+procedure CloseRunningApp();
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM ' + '{#MyAppExeName}', '', SW_HIDE,
+       ewWaitUntilTerminated, ResultCode);
+end;
+
+/// <summary>
+/// 按进程名判断程序是否在跑。
+/// <para>
+/// 为什么不只靠 [Setup] 的 AppMutex：那个互斥体是 1.0.3 才加的，
+/// 1.0.0–1.0.2 运行的实例根本不建它，升级时查不到 → 放行 →
+/// 覆盖 MemberManager.exe.config 时被 Windows 锁住，报
+/// 「MoveFile 失败: 错误代码 5。拒绝访问」（店主 11-15 客户现场实拍）。
+/// </para>
+/// <para>
+/// tasklist 的输出在中文系统上是 GBK，但我们只匹配 ASCII 的 exe 名，
+/// LoadStringsFromFile 按 ANSI 读不会影响判断。
+/// </para>
+/// </summary>
+function IsAppRunning(): Boolean;
+var
+  ResultCode: Integer;
+  TmpFile: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  Result := False;
+  TmpFile := ExpandConstant('{tmp}\mm-procs.txt');
+  if not Exec('cmd.exe',
+              '/c tasklist /FI "IMAGENAME eq {#MyAppExeName}" /NH > "' + TmpFile + '"',
+              '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    exit;
+  if not FileExists(TmpFile) then exit;
+  try
+    if LoadStringsFromFile(TmpFile, Lines) then
+      for I := 0 to GetArrayLength(Lines) - 1 do
+        if Pos(UpperCase('{#MyAppExeName}'), UpperCase(Lines[I])) > 0 then
+        begin
+          Result := True;
+          break;
+        end;
+  finally
+    DeleteFile(TmpFile);
+  end;
+end;
+
 /// <summary>
 /// Runs before any file is copied. Installs the bundled .NET 4.8 offline package
 /// when the machine lacks it. Returns a non-empty string to abort the install.
@@ -231,6 +288,41 @@ var
   HasNet: Boolean;
 begin
   Result := '';
+
+  // ---- 先处理「程序还在跑」 ----
+  // 覆盖安装要改写 exe / exe.config / dll，只要有一个进程持有这些文件，
+  // Windows 就拒绝改名，向导会在半路弹「MoveFile 失败: 错误代码 5。拒绝访问」。
+  // AppMutex 只认识 1.0.3 以后启动的实例，这里按进程名再兜一层。
+  if IsAppRunning() then
+  begin
+    if WizardSilent() then
+    begin
+      // 无人值守安装（/SILENT、/VERYSILENT，或 IT 批量部署）：没人能点按钮，
+      // 弹框只会让安装一直挂着。直接关掉继续，日志留痕。
+      Log('Saw a running MemberManager instance; closing it (silent mode)');
+      CloseRunningApp();
+      Sleep(1500);
+    end
+    else if MsgBox('安装前需要先关闭「会员管家」。' + NL + NL +
+                   '它可能正在后台运行（屏幕右下角任务栏里能找到）。' + NL + NL +
+                   '点「是」= 现在自动关闭并继续安装' + NL +
+                   '点「否」= 退出安装，您自己关掉后再运行安装包',
+                   mbConfirmation, MB_YESNO) = IDYES then
+    begin
+      Log('Saw a running MemberManager instance, closing it before overwriting files');
+      CloseRunningApp();
+      Sleep(1500);   // 给 Windows 一点时间释放文件句柄
+    end
+    else
+    begin
+      Result := '已取消安装。' + NL + NL +
+                '请先关闭「会员管家」（屏幕右下角任务栏图标右键退出，' + NL +
+                '或按 Ctrl+Alt+Del 打开任务管理器结束 MemberManager 进程），' + NL +
+                '然后重新运行安装包。';
+      exit;
+    end;
+  end;
+
   HasNet := HasDotNet48();
 
 #ifdef LIGHT
@@ -292,15 +384,9 @@ begin
     NeedsRestart := True;
 end;
 
-// Closing the running app up front: it keeps a handle on its own dll files and
-// on data\member.db (the exact situation compile-inprocess.ps1 guards against).
-procedure CloseRunningApp();
-var
-  ResultCode: Integer;
-begin
-  Exec('taskkill.exe', '/F /IM ' + '{#MyAppExeName}', '', SW_HIDE,
-       ewWaitUntilTerminated, ResultCode);
-end;
+// (CloseRunningApp now lives above PrepareToInstall, because the installer calls
+//  it too — a running instance locks exe / exe.config and the copy dies with
+//  "MoveFile failed: code 5, access denied".)
 
 // Auto-start lives in HKCU Run only (AutoStart.cs - registry is the single
 // source of truth). Leaving it behind would launch a deleted exe every logon.
